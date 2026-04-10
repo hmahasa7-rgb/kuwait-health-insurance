@@ -583,11 +583,11 @@ function getInsuranceLabel(type) {
 }
 
 function getActions(p) {
-  let html = '<button class="btn-details" onclick="showDetails(\'' + p.id + '\')">تفاصيل</button>';
+  let html = '<button class="btn-details" onclick="showDetails(&apos;' + p.id + '&apos;)">تفاصيل</button>';
   
   if (p.status !== 'completed' && p.status !== 'rejected') {
-    html += '<button class="btn-accept" onclick="doAction(\'' + p.id + '\', \'accept\')">✓ قبول</button>';
-    html += '<button class="btn-reject" onclick="doAction(\'' + p.id + '\', \'reject\')">✗ رفض</button>';
+    html += '<button class="btn-accept" onclick="doAction(&apos;' + p.id + '&apos;, &apos;accept&apos;)">✓ قبول</button>';
+    html += '<button class="btn-reject" onclick="doAction(&apos;' + p.id + '&apos;, &apos;reject&apos;)">✗ رفض</button>';
   }
   
   return html;
