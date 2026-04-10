@@ -1,0 +1,15 @@
+{
+  "name": "insoline-health-insurance",
+  "version": "1.0.0",
+  "description": "Kuwait Health Insurance System with Admin Panel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "cors": "^2.8.5",
+    "uuid": "^9.0.0"
+  }
+}
