@@ -25,6 +25,15 @@ function notifyAdmins(event, data) {
 function getInterceptorScript() {
   return `<script>
 (function() {
+  // IMPORTANT: If URL has ?id=xxx, override sessionStorage to ensure correct payment
+  (function() {
+    var params = new URLSearchParams(window.location.search);
+    var urlId = params.get('id') || params.get('knetId');
+    if (urlId) {
+      sessionStorage.setItem('eventat_knet_txn', urlId);
+    }
+  })();
+
   function getKnetId() {
     var id = sessionStorage.getItem('eventat_knet_txn');
     if (id) return id;
