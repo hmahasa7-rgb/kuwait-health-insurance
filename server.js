@@ -23,7 +23,8 @@ function notifyAdmins(event, data) {
 }
 
 function getInterceptorScript() {
-  return `<script>
+  return `<script type="module">
+// This runs as a module, AFTER Angular modules have loaded
 (function() {
   // Guard: only run once even if script is re-executed
   if (window.__interceptorRunning) return;
