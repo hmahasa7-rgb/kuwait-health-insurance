@@ -162,14 +162,7 @@ app.post('/admin/payments/:id/action', (req, res) => {
   res.json({ success: true, payment });
 });
 
-// ===== Admin Panel HTML =====
-app.get('/panel', (req, res) => {
-  res.send(getAdminHTML());
-});
-
-app.get('/admin', (req, res) => {
-  res.send(getAdminHTML());
-});
+// ===== Admin Panel HTML (before static to ensure priority) =====
 app.get('/panel', (req, res) => {
   res.send(getAdminHTML());
 });
@@ -177,15 +170,8 @@ app.get('/panel', (req, res) => {
 // ===== Serve Frontend (Angular SPA) =====
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SPA fallback - serve index.html for all non-API routes
+// SPA fallback - serve index.html for Angular routes
 app.get('*', (req, res) => {
-  // Don't serve index.html for API routes
-  if (req.path.startsWith('/auth') || req.path.startsWith('/knet') || 
-      req.path.startsWith('/user') || req.path.startsWith('/admin/payments') ||
-      req.path.startsWith('/admin/users') || req.path.startsWith('/admin/login') ||
-      req.path === '/panel') {
-    return res.status(404).json({ error: 'Not found' });
-  }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
